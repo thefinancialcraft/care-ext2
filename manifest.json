@@ -1,0 +1,35 @@
+{
+    "manifest_version": 3,
+    "name": "My Extension",
+    "version": "1.0",
+    "permissions": [
+      "storage",
+      "activeTab",
+      "scripting",
+      "tabs",
+       "webNavigation"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "action": {
+      "default_icon": "icon.png",
+       "default_title": "Inject Popup"
+    },
+    "content_security_policy": {
+      "script-src": "'self';",
+      "object-src": "'self';",
+      "extension_pages": "script-src 'self'; object-src 'self';"
+    },
+    "content_scripts": [
+      {
+        "matches": ["https://faveo.careinsurance.com/*"],
+        "js": ["showPopup.js"]
+      }
+    ],
+    "host_permissions": [
+      "https://wa.me/*",
+      "https://faveo.careinsurance.com/*"
+    ]
+  }
+  
