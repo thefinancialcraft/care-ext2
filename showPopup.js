@@ -1,4 +1,42 @@
 (function () {
+    // 🛡️ STOP IF ORPHANED: Check if chrome context is already invalidated
+    if (!chrome.runtime?.id) {
+       console.error('Extension context is invalidated. Refresh the page to continue.');
+       return;
+    }
+
+    // 🛡️ PREVENT DUAL RUNS: Stop if a version is already active
+    if (window.careExtInitialized) {
+       console.warn('showPopup.js already running. Stopping redundant instance.');
+       return;
+    }
+    window.careExtInitialized = true;
+    let extensionGlobalActive = true; // 🚀 Global master switch
+
+    const stopAllExtensionProcesses = () => {
+        extensionGlobalActive = false;
+        isAutoSyncRunning = false;
+        isGamePlaying = false;
+        
+        // Wipe data
+        tableData = [];
+        accumulatedData = [];
+        
+        // Cleanup UI
+        removeExtractionOverlay();
+        const popup = document.getElementById('my-dashboard-popup');
+        const miniBar = document.getElementById('compactStatusBar');
+        if (popup) popup.remove();
+        if (miniBar) miniBar.remove();
+
+        // Stop background upload
+        if (chrome.runtime?.id) {
+            chrome.runtime.sendMessage({ type: 'PAUSE_UPLOAD' });
+        }
+        
+        console.log('🛑 Extension: All processes stopped and data erased.');
+    };
+
     // ====== ICON LOADERS ======
     const loadIconCDN = () => {
       const loadCDN = (href) => {
@@ -12,6 +50,8 @@
   
       loadCDN('https://cdn-uicons.flaticon.com/3.0.0/uicons-thin-straight/css/uicons-thin-straight.css'); // Drag Icon
       loadCDN('https://cdn-uicons.flaticon.com/2.6.0/uicons-bold-rounded/css/uicons-bold-rounded.css'); // Cross Icon
+      loadCDN('https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css'); // Minimize Icon
+      loadCDN('https://cdn-uicons.flaticon.com/3.0.0/uicons-thin-rounded/css/uicons-thin-rounded.css'); // Thin Rounded Icons (New)
     };
     
     // ====== SPINNER CREATION ======
@@ -57,36 +97,321 @@
       });
   
       const dragIcon = document.createElement('span');
-      dragIcon.className = 'fi fi-ts-scrubber';
+      dragIcon.className = 'fi flex fi-ts-scrubber';
       Object.assign(dragIcon.style, {
-        cursor: 'move', fontSize: '15px', color: '#bcbcbc', marginBottom: '8px',
+        cursor: 'move', fontSize: '15px', color: '#bcbcbc', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center'
       });
   
-      const closeBtn = document.createElement('button');
-      closeBtn.innerHTML = '<i class="fi fi-br-cross"></i>';
-      Object.assign(closeBtn.style, {
-        background: 'transparent', color: '#bcbcbc', border: 'none', fontSize: '12px', cursor: 'pointer',
+      const topBtnGroup = document.createElement('div');
+      topBtnGroup.style.display = 'flex';
+      topBtnGroup.style.gap = '8px';
+      topBtnGroup.style.alignItems = 'center';
+
+      const minimizeBtn = document.createElement('button');
+      minimizeBtn.id = 'toggleMinimizeBtn';
+      minimizeBtn.innerHTML = '<i class="fi flex fi-rr-angle-small-down"></i>';
+      Object.assign(minimizeBtn.style, {
+        background: 'transparent', color: '#bcbcbc', border: 'none', fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
       });
-      closeBtn.onclick = () => popup.remove();
+      minimizeBtn.onclick = () => toggleMinimize();
+
+      const closeBtn = document.createElement('button');
+      closeBtn.innerHTML = '<i class="fi flex fi-br-cross"></i>';
+      Object.assign(closeBtn.style, {
+        background: 'transparent', color: '#bcbcbc', border: 'none', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+      });
+      closeBtn.onclick = () => stopAllExtensionProcesses();
+  
+      topBtnGroup.appendChild(minimizeBtn);
+      topBtnGroup.appendChild(closeBtn);
   
       topContainer.appendChild(dragIcon);
-      topContainer.appendChild(closeBtn);
+      topContainer.appendChild(topBtnGroup);
   
       makeDraggable(popup, dragIcon);
       return topContainer;
+    };
+
+    let isSuperCompactMode = true; // 🚀 EXTRA-COMPACT by default now!
+
+    const createMinimizedBar = () => {
+        const bar = document.createElement('div');
+        bar.id = 'compactStatusBar';
+        Object.assign(bar.style, {
+            position: 'fixed', top: '10px', right: '15px', 
+            background: 'linear-gradient(135deg, #1e3a5f 0%, #0065b3 100%)', 
+            border: 'none',
+            borderRadius: '12px', 
+            padding: '8px 18px', // 🚀 Super-compact padding by default
+            zIndex: '10000',
+            boxShadow: '0 8px 32px rgba(0, 101, 179, 0.25)',
+            display: 'none', alignItems: 'center', 
+            gap: '10px', // 🚀 Compact gap
+            minWidth: 'auto', // 🚀 Minimal width by default
+            height: '44px', 
+            cursor: 'pointer', overflow: 'hidden',
+            backdropFilter: 'blur(8px)',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+        });
+
+        // 📊 Bottom Mini Progress Bar
+        const miniProgress = document.createElement('div');
+        miniProgress.id = 'miniProgressLine';
+        Object.assign(miniProgress.style, {
+            position: 'absolute', bottom: '0', left: '0', 
+            height: '3px', background: '#4caf50', width: '0%', 
+            transition: 'width 0.5s ease', boxShadow: '0 0 8px rgba(76, 175, 80, 0.5)'
+        });
+
+        // 🚀 Super-Compact Toggle Button
+        const toggleBtn = document.createElement('button');
+        toggleBtn.id = 'superCompactToggle';
+        toggleBtn.innerHTML = '<i class="fi flex fi-tr-angle-small-right"></i>'; // 🚀 Point right to expand
+        Object.assign(toggleBtn.style, {
+            background: 'transparent', border: 'none', color: '#fff', 
+            fontSize: '12px', cursor: 'pointer', padding: '0 1px 0 0', height: '20px',
+            display: 'flex', alignItems: 'center', transition: 'all 0.3s'
+        });
+        toggleBtn.title = 'Super-Compact Mode';
+
+        toggleBtn.onclick = (e) => {
+            e.stopPropagation();
+            isSuperCompactMode = !isSuperCompactMode;
+            
+            const nHandle = document.getElementById('miniNameHandle');
+            const aBtn = document.getElementById('miniAutoSyncBtn');
+            const eBtn = document.getElementById('miniExpandBtn');
+            const cBtn = document.getElementById('miniCloseBtn');
+            const cBar = document.getElementById('compactStatusBar');
+            
+            if (isSuperCompactMode) {
+                if (nHandle) nHandle.style.display = 'none';
+                if (aBtn) aBtn.style.display = 'none';
+                if (eBtn) eBtn.style.display = 'none';
+                if (cBtn) cBtn.style.display = 'none';
+                if (cBar) {
+                    cBar.style.minWidth = 'auto'; // 🚀 Shrink to content width auto-adjust
+                    cBar.style.width = 'auto';
+                    cBar.style.height = '44px'; // 🚀 Keep height uniform
+                    cBar.style.padding = '8px 18px'; // 🚀 Increased horizontal padding
+                    cBar.style.gap = '10px';
+                }
+                toggleBtn.innerHTML = '<i class="fi flex fi-tr-angle-small-right"></i>';
+                toggleBtn.style.color = '#fff';
+            } else {
+                if (nHandle) nHandle.style.display = 'flex';
+                // Only show auto-sync button if it's not hidden by the process logic
+                if (aBtn && !isAutoSyncRunning) aBtn.style.display = 'flex'; 
+                if (eBtn) eBtn.style.display = 'flex';
+                if (cBtn) cBtn.style.display = 'flex';
+                if (cBar) {
+                    cBar.style.minWidth = '320px';
+                    cBar.style.width = 'auto';
+                    cBar.style.padding = '8px 16px'; // 🚀 Reverted to 16px
+                    cBar.style.gap = '15px';
+                }
+                toggleBtn.innerHTML = '<i class="fi flex fi-tr-angle-small-left"></i>';
+                toggleBtn.style.color = 'rgba(255,255,255,0.4)';
+            }
+        };
+
+        const nameHandle = document.createElement('div');
+        nameHandle.id = 'miniNameHandle';
+        Object.assign(nameHandle.style, {
+            display: 'none', // 🚀 Hidden by default
+            alignItems: 'center', gap: '6px', 
+            cursor: 'move', minWidth: '100px'
+        });
+
+        const statsArea = document.createElement('div');
+        statsArea.id = 'miniStatsArea';
+        Object.assign(statsArea.style, {
+            display: 'flex', alignItems: 'center', gap: '15px', 
+            flexGrow: '1', cursor: 'default'
+        });
+
+        const autoPilotBtn = document.createElement('button');
+        autoPilotBtn.id = 'miniAutoSyncBtn';
+        autoPilotBtn.innerHTML = '⚡';
+        Object.assign(autoPilotBtn.style, {
+            display: 'none', // 🚀 Hidden by default
+            background: 'transparent', border: 'none', color: '#ffeb3b', 
+            fontSize: '16px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
+            width: '28px', height: '28px', alignItems: 'center', justifyContent: 'center',
+            transition: 'transform 0.2s', filter: 'drop-shadow(0 0 5px rgba(255, 235, 59, 0.5))'
+        });
+        autoPilotBtn.title = 'Start Auto-Pilot (Extraction + Upload)';
+        autoPilotBtn.onclick = (e) => {
+            e.stopPropagation();
+            autoPilotBtn.style.display = 'none'; // 🚀 Hide once clicked
+            handleAutoSyncClick();
+        };
+        autoPilotBtn.onmouseover = () => autoPilotBtn.style.transform = 'scale(1.2) rotate(15deg)';
+        autoPilotBtn.onmouseout = () => autoPilotBtn.style.transform = 'scale(1) rotate(0deg)';
+
+        const expandBtn = document.createElement('button');
+        expandBtn.id = 'miniExpandBtn';
+        expandBtn.innerHTML = '<i class="fi flex fi-tr-browsers"></i>';
+        Object.assign(expandBtn.style, {
+            display: 'none', // 🚀 Hidden by default
+            background: 'transparent', border: 'none', color: '#fff',
+            fontSize: '14px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
+            width: '28px', height: '28px', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 0.2s'
+        });
+        expandBtn.title = 'Expand Dashboard';
+        expandBtn.onmouseover = () => expandBtn.style.background = 'rgba(255,255,255,0.2)';
+        expandBtn.onmouseout = () => expandBtn.style.background = 'transparent';
+        
+        expandBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleMinimize();
+        };
+
+        const closeBtn = document.createElement('button');
+        closeBtn.id = 'miniCloseBtn';
+        closeBtn.innerHTML = '<i class="fi flex fi-br-cross"></i>';
+        Object.assign(closeBtn.style, {
+            display: 'none', // 🚀 Hidden by default
+            background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+            fontSize: '10px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
+            width: '24px', height: '24px', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.2s'
+        });
+        closeBtn.title = 'Close Extension';
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            stopAllExtensionProcesses();
+        };
+        closeBtn.onmouseover = () => { 
+            closeBtn.style.background = 'rgba(244,67,54,0.3)'; 
+            closeBtn.style.color = '#fff'; 
+        };
+        closeBtn.onmouseout = () => { 
+            closeBtn.style.background = 'transparent'; 
+            closeBtn.style.color = 'rgba(255,255,255,0.5)'; 
+        };
+
+        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, expandBtn, closeBtn, miniProgress);
+        document.body.appendChild(bar);
+
+        // 🚀 Enable Dragging ONLY for the Name Handle
+        makeDraggable(bar, nameHandle);
+
+        return bar;
+    };
+
+    const toggleMinimize = (forceExpand = false) => {
+        const popup = document.getElementById('my-dashboard-popup');
+        const compactBar = document.getElementById('compactStatusBar') || createMinimizedBar();
+        
+        const isCurrentlyCompact = compactBar.style.display === 'flex';
+
+        if (isCurrentlyCompact || forceExpand) {
+            // EXPAND
+            compactBar.style.display = 'none';
+            if (popup) popup.style.display = 'flex';
+        } else {
+            // MINIMIZE
+            if (popup) popup.style.display = 'none';
+            compactBar.style.display = 'flex';
+            updateMinimizedStatus();
+        }
+    };
+
+    const updateMinimizedStatus = () => {
+        const compactBar = document.getElementById('compactStatusBar');
+        const nameHandle = document.getElementById('miniNameHandle');
+        const statsArea = document.getElementById('miniStatsArea');
+        if (!nameHandle || !statsArea || !compactBar || compactBar.style.display === 'none') return;
+        
+        const fullAgentName = document.getElementById('agentName')?.textContent?.trim() || 'Agent';
+        const agentName = fullAgentName.split(' ')[0]; 
+        const progressRaw = document.getElementById('uploadProgressText')?.textContent || '';
+        const liveTotal = document.getElementById('liveExtTotal')?.textContent || '0';
+        
+        let total = liveTotal;
+        if (progressRaw.includes('Total Leads:')) {
+           total = progressRaw.split('|')[0].replace('Total Leads:', '').trim();
+        }
+
+        const uploaded = progressRaw.includes('|') ? progressRaw.split('|')[1]?.replace('Uploaded: ', '').trim() : '0';
+        const percent = progressRaw.includes('%') ? progressRaw.match(/\d+%/)[0] : '0%';
+        const timerText = document.getElementById('estTimeText')?.textContent || '';
+        const timer = timerText.replace('Estimated Time: ', '') || '--';
+
+        // 🚀 Update Name Handle area (Draggable)
+        nameHandle.innerHTML = `
+            <i class="fi flex fi-rr-user" style="color:#e3f2fd; font-size:14px; display:flex; align-items:center; justify-content:center;"></i>
+            <span style="color:#fff; font-size:12px; font-weight:bold; letter-spacing:0.3px;">${agentName}</span>
+        `;
+        
+        // 🚀 Control visibility based on super-compact state
+        nameHandle.style.display = isSuperCompactMode ? 'none' : 'flex';
+
+        // Update mini progress line width based on percentage
+        const miniProgress = document.getElementById('miniProgressLine');
+        if (miniProgress) miniProgress.style.width = percent;
+
+        if (percent === '100%') {
+            // ⚡ Show auto-pilot button again on completion
+            const miniBtn = document.getElementById('miniAutoSyncBtn');
+            if (miniBtn && !isSuperCompactMode) miniBtn.style.display = 'flex';
+
+            statsArea.innerHTML = `
+                <div style="height:14px; width:1px; background:rgba(255,255,255,0.3);"></div>
+                <div style="display:flex; align-items:center; gap:6px; color:#c8e6c9; font-size:12px; font-weight:bold;">
+                    <i class="fi flex fi-rr-check-circle" style="font-size:14px; display:flex; align-items:center; justify-content:center;"></i>
+                    <span>Success</span>
+                </div>
+            `;
+            return;
+        }
+
+        // 🚀 Action button visibility based on super-compact
+        const miniBtn = document.getElementById('miniAutoSyncBtn');
+        if (miniBtn) {
+            miniBtn.style.display = isSuperCompactMode ? 'none' : (isAutoSyncRunning ? 'none' : 'flex');
+        }
+
+        // 🚀 Update Stats Area (Non-Draggable)
+        statsArea.innerHTML = `
+            <div style="height:14px; width:1px; background:rgba(255,255,255,0.3);"></div>
+            <div style="display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:bold;">
+                <i class="fi flex fi-rr-chart-connected" style="color:#ffccbc;"></i>
+                <span>${total}</span>
+            </div>
+            
+            <div style="height:14px; width:1px; background:rgba(255,255,255,0.3);"></div>
+            
+            <div style="display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:bold;">
+                <i class="fi flex fi-rr-clock-three" style="color:#bbdefb;"></i>
+                <span>${timer}</span>
+            </div>
+            
+            <div style="height:14px; width:1px; background:rgba(255,255,255,0.3);"></div>
+            
+            <div style="display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:bold;">
+                <i class="fi flex fi-rr-check-circle" style="color:#c8e6c9;"></i>
+                <span>${uploaded}</span>
+            </div>
+        `;
     };
 
 
   
     // ====== BUTTON CONTAINER CREATION ======
     const createButtonContainer = (popup) => {
+      const existing = document.getElementById('mainActBtn');
+      if (existing) return existing;
+
       const container = document.createElement('div');
       container.id = 'mainActBtn';
       Object.assign(container.style, {
         marginTop: '10px', display: 'none', flexWrap: 'wrap', gap: '10px', flexDirection: 'row',
       });
   
-      const buttonNames = ['Current Month', 'Custom Month'];
+      const buttonNames = ['Current Month', 'Custom Month', '⚡ Auto Sync'];
       buttonNames.forEach((name) => {
         const btn = document.createElement('button');
         btn.innerText = name;
@@ -103,6 +428,8 @@
           btn.onclick = () => handleCurrentMonthClick(popup);
         } else if (name === 'Custom Month') {
           btn.onclick = () => handleCustomMonthClick(popup);
+        } else if (name === '⚡ Auto Sync') {
+          btn.onclick = () => handleAutoSyncClick(popup);
         }
   
         container.appendChild(btn);
@@ -1133,7 +1460,7 @@ ttlAmt.onclick = () => {
         iconRow.appendChild(dots);
         iconRow.appendChild(icon2);
       
-        // Bottom span with progress label and bar
+        // Bottom span with progress label, bar and ESTIMATED TIME
         const progressSpan = document.createElement('span');
         progressSpan.style.width = '100%';
         progressSpan.style.marginTop = '12px';
@@ -1147,6 +1474,14 @@ ttlAmt.onclick = () => {
         progressText.style.fontWeight = 'bold';
         progressText.style.marginBottom = '6px';
         progressText.innerText = `Total Leads: ${accumulatedData ? accumulatedData.length : 0} | Uploaded: 0 | 0%`;
+
+        const estTimeText = document.createElement('div');
+        estTimeText.id = 'estTimeText';
+        estTimeText.style.fontSize = '11px';
+        estTimeText.style.color = '#1565c0'; // Blue
+        estTimeText.style.marginBottom = '6px';
+        estTimeText.style.fontWeight = 'bold';
+        estTimeText.innerText = `Estimated Time: Calculating...`;
         
         const progressBar = document.createElement('div');
         progressBar.style.height = '8px';
@@ -1162,8 +1497,20 @@ ttlAmt.onclick = () => {
           transition: width 0.4s ease;"></div>
       `;
       
+        const currentLeadInfo = document.createElement('div');
+        currentLeadInfo.id = 'currentLeadInfo';
+        currentLeadInfo.style.fontSize = '12px';
+        currentLeadInfo.style.color = '#333';
+        currentLeadInfo.style.marginTop = '10px';
+        currentLeadInfo.style.fontWeight = '500';
+        currentLeadInfo.style.textAlign = 'center';
+        currentLeadInfo.style.minHeight = '18px';
+        currentLeadInfo.innerText = '-';
+
         progressSpan.appendChild(progressText);
+        progressSpan.appendChild(estTimeText);
         progressSpan.appendChild(progressBar);
+        progressSpan.appendChild(currentLeadInfo);
 
         // Upload Control Buttons container
         const controlBtns = document.createElement('div');
@@ -1204,6 +1551,7 @@ ttlAmt.onclick = () => {
         });
 
         pauseBtn.addEventListener('click', () => {
+          if (!chrome.runtime?.id) return alert('Session Expired. Please refresh the page.');
           chrome.runtime.sendMessage({ type: 'PAUSE_UPLOAD' });
           pauseBtn.style.display = 'none';
           resumeBtn.style.display = 'block';
@@ -1216,9 +1564,11 @@ ttlAmt.onclick = () => {
           const currentText = textEl ? textEl.innerText.replace(' | ', '\n') : '';
           summaryDiv.innerText = `Paused.\n${currentText}`;
           dots.style.display = 'none'; // hide blinking dots
+          if (countdownInterval) clearInterval(countdownInterval);
         });
         
         resumeBtn.addEventListener('click', () => {
+          if (!chrome.runtime?.id) return alert('Session Expired. Please refresh the page.');
           chrome.runtime.sendMessage({ type: 'RESUME_UPLOAD' });
           pauseBtn.style.display = 'block';
           resumeBtn.style.display = 'none';
@@ -1228,6 +1578,7 @@ ttlAmt.onclick = () => {
         });
         
         restartBtn.addEventListener('click', () => {
+          if (!chrome.runtime?.id) return alert('Session Expired. Please refresh the page.');
           chrome.runtime.sendMessage({ type: 'RESTART_UPLOAD' });
           pauseBtn.style.display = 'block';
           resumeBtn.style.display = 'none';
@@ -1262,14 +1613,118 @@ const createCustomMonthActionUI = () => {
       borderTop: '1px solid #bcbcbc',
     });
   
+    // 📅 UI for selecting dates in the Popup
+    const inputArea = document.createElement('div');
+    inputArea.style.margin = '15px 0 0 0';
+    inputArea.style.display = 'flex';
+    inputArea.style.flexDirection = 'column';
+    inputArea.style.gap = '8px';
+    inputArea.style.width = '80%';
+    inputArea.id = 'popupDateInputBox';
+    
+    // Using type="date" to get the browser's custom visual calendar, but with styling
+    inputArea.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <label style="font-size:12px; font-weight:bold; color:#555;">Start Date:</label>
+        <input type="date" id="popStart" style="width:115px; padding:3px 5px; border:1px solid #0065b3; border-radius:4px; font-size:11px; background:#f8fbff; cursor:pointer;">
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <label style="font-size:12px; font-weight:bold; color:#555;">End Date:</label>
+        <input type="date" id="popEnd" style="width:115px; padding:3px 5px; border:1px solid #0065b3; border-radius:4px; font-size:11px; background:#f8fbff; cursor:pointer;">
+      </div>
+    `;
+    container.appendChild(inputArea);
+
     const instruction = document.createElement('p');
     instruction.id = 'dateInstruction';
     instruction.innerText = 'Please Select date';
-    instruction.style.marginTop = '15px';
-    instruction.style.marginBottom = '2px';
-    instruction.style.fontSize = '16px';
+    instruction.style.margin = '12px 0 2px 0';
+    instruction.style.fontSize = '14px';
     instruction.style.fontWeight = 'bold';
     container.appendChild(instruction);
+    
+    // Conversion helpers: Website expects DD/MM/YYYY, Browser uses YYYY-MM-DD
+    const webToNative = (val) => {
+        if (!val || val.length < 10) return '';
+        const parts = val.split('/');
+        return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    };
+    const nativeToWeb = (val) => {
+        if (!val || val.length < 10) return '';
+        const parts = val.split('-');
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+
+    const getFormattedWebDate = (date) => {
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const yyyy = date.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+    };
+
+    const firstOfMonth = new Date();
+    firstOfMonth.setDate(1);
+    const today = new Date();
+
+    const getNativeDate = (date) => {
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    const nativeStart = getNativeDate(firstOfMonth);
+    const nativeToday = getNativeDate(today);
+
+    // Auto-update DOM helper
+    const syncToDom = (targetId, val) => {
+        const domInput = document.getElementById(targetId) || document.getElementById(targetId + '1');
+        // 'val' here is web format DD/MM/YYYY
+        if (domInput && val && val.length >= 10) {
+            domInput.value = val;
+            domInput.dispatchEvent(new Event('input', { bubbles: true }));
+            domInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    };
+
+    // Auto-select initial dates and setup listeners
+    setTimeout(() => {
+        const popStart = document.getElementById('popStart');
+        const popEnd = document.getElementById('popEnd');
+        const fromInput = document.getElementById('from_date') || document.getElementById('from_date1');
+        const toInput = document.getElementById('to_date') || document.getElementById('to_date1');
+
+        // Set initial defaults in popup UI (must be YYYY-MM-DD)
+        if (popStart) popStart.value = nativeStart;
+        if (popEnd) popEnd.value = nativeToday;
+
+        // Sync defaults to the actual website DOM immediately (must be DD/MM/YYYY)
+        syncToDom('from_date', nativeToWeb(nativeStart));
+        syncToDom('to_date', nativeToWeb(nativeToday));
+
+        if (popStart) popStart.addEventListener('change', (e) => syncToDom('from_date', nativeToWeb(e.target.value)));
+        if (popEnd) popEnd.addEventListener('change', (e) => syncToDom('to_date', nativeToWeb(e.target.value)));
+
+        // Enhancement: Still try to physically click 1st day to wake up website's internal state
+        if (fromInput) {
+            fromInput.click(); 
+            let attempts = 0;
+            const findAndClickDate = setInterval(() => {
+                attempts++;
+                const firstDayLink = document.querySelector('.ui-datepicker-calendar tbody a[data-date="1"]');
+                if (firstDayLink || attempts > 15) {
+                    clearInterval(findAndClickDate);
+                    if (firstDayLink) firstDayLink.click();
+                    
+                    // After clicking, read the automatic value back into the popup!
+                    setTimeout(() => {
+                        if (fromInput && popStart) popStart.value = webToNative(fromInput.value);
+                        if (toInput && popEnd) popEnd.value = webToNative(toInput.value);
+                    }, 500);
+                }
+            }, 200);
+        }
+    }, 800);
   
     const buttonRow = document.createElement('div');
     Object.assign(buttonRow.style, {
@@ -1309,8 +1764,11 @@ const createCustomMonthActionUI = () => {
         console.log(`${label} clicked`);
   
         if (label === 'Start Extracting') {
-          const fromDate = document.getElementById('from_date1')?.value;
-          const toDate = document.getElementById('to_date1')?.value;
+          const fromInput = document.getElementById('from_date1') || document.getElementById('from_date');
+          const toInput = document.getElementById('to_date1') || document.getElementById('to_date');
+          
+          const fromDate = fromInput?.value;
+          const toDate = toInput?.value;
 
   
           if (fromDate && toDate) {
@@ -1367,8 +1825,6 @@ const createCustomMonthActionUI = () => {
         minWidth: '350px', maxWidth: '350px', height: 'auto', transition: 'height 0.5s ease',
       });
   
-      popup.appendChild(createTopBar(popup));
-  
       const greet = document.createElement('span');
       greet.innerText = 'Welcome to the Dashboard!';
       greet.style.fontSize = '12px';
@@ -1383,7 +1839,20 @@ const createCustomMonthActionUI = () => {
       const buttonContainer = createButtonContainer(popup);
       const spinner = createSpinner();
   
+      // Create Minimized Status Bar (Hidden by default)
+      const minStatus = document.createElement('div');
+      minStatus.id = 'minimizedStatus';
+      Object.assign(minStatus.style, {
+          display: 'none', width: '100%', flexGrow: '1', alignItems: 'center', justifyContent: 'flex-start'
+      });
+  
       popup.append(greet, nameSpan, buttonContainer, spinner);
+      const topBar = createTopBar(popup);
+      topBar.id = 'top-bar-container';
+      popup.insertBefore(topBar, popup.firstChild);
+
+      createMinimizedBar(); // Create the hidden bar initially
+
       document.body.appendChild(popup);
       return { popup, nameSpan, spinner, buttonContainer };
     };
@@ -1393,6 +1862,10 @@ const createCustomMonthActionUI = () => {
       dragHandle.addEventListener('mousedown', (e) => {
         const offsetX = e.clientX - popup.offsetLeft;
         const offsetY = e.clientY - popup.offsetTop;
+        
+        // 🚀 Smooth Dragging: Disable transition temporarily
+        const originalTransition = popup.style.transition;
+        popup.style.transition = 'none';
   
         const onMouseMove = (e) => {
           popup.style.left = `${e.clientX - offsetX}px`;
@@ -1401,6 +1874,8 @@ const createCustomMonthActionUI = () => {
         };
   
         const onMouseUp = () => {
+          // 🚀 Restore transition
+          popup.style.transition = originalTransition;
           document.removeEventListener('mousemove', onMouseMove);
           document.removeEventListener('mouseup', onMouseUp);
         };
@@ -1423,11 +1898,13 @@ const createCustomMonthActionUI = () => {
           nameSpan.innerText = nameHeader.textContent.trim();
           spinner.style.display = 'none';
           buttonContainer.style.display = 'flex';
+          updateMinimizedStatus(); // 🚀 Refresh mini bar with fetched name
   
           const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');
           dashboardLink?.click();
         } else {
           nameSpan.innerText = 'Name not found.';
+          updateMinimizedStatus();
         }
       }, 1500);
     };
@@ -1493,12 +1970,79 @@ const handleCustomMonthClick = () => {
     proposalBtn?.click();
   };
   
+  const handleAutoSyncClick = (passedPopup) => {
+    let popup = passedPopup;
+    if (!popup) popup = document.getElementById('my-dashboard-popup');
+    if (!popup) return console.log('Popup element not found.');
+
+    isAutoSyncRunning = true; // 🚀 Enable auto-pilot mode for this run
+    popup.style.maxHeight = '500px';
+    
+    // Show minimize button and auto-minimize only if not already minimized
+    const compactBar = document.getElementById('compactStatusBar');
+    const isAlreadyMinimized = compactBar && compactBar.style.display === 'flex';
+
+    const minBtn = document.getElementById('toggleMinimizeBtn');
+    if (minBtn) {
+        minBtn.style.display = 'block';
+        if (!isAlreadyMinimized) toggleMinimize(); // Start minimized only if currently expanded
+    }
+
+    const buttonContainer = document.getElementById('mainActBtn');
+    if (buttonContainer) buttonContainer.remove();
+
+    const spinner = createSpinner();
+    popup.appendChild(spinner);
+
+    // 1. Calculate dates
+    const today = new Date();
+    const firstOfPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    
+    const formatDate = (date) => {
+        const dd = String(date.getDate()).padStart(2, '0');
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const yyyy = date.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
+    };
+
+    const startVal = formatDate(firstOfPrevMonth);
+    const endVal = formatDate(today);
+
+    // 2. Click proposals link
+    const proposalBtn = document.querySelector('.button.view_proposals_btn');
+    proposalBtn?.click();
+
+    setTimeout(() => {
+        // 3. Sync to DOM
+        const fromInput = document.getElementById('from_date') || document.getElementById('from_date1');
+        const toInput = document.getElementById('to_date') || document.getElementById('to_date1');
+
+        if (fromInput && toInput) {
+            fromInput.value = startVal;
+            fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+            fromInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+            toInput.value = endVal;
+            toInput.dispatchEvent(new Event('input', { bubbles: true }));
+            toInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        // 4. Start Extraction
+        setTimeout(() => {
+            spinner.remove();
+            extractRenewalTableData();
+        }, 1500);
+
+    }, 6000); // 🚀 Wait 6 seconds for initial table/page load before filling dates
+  };
+  
       
 
       
     // ====== TABLE DATA EXTRACTOR ======
     let tableData = [];  // Make tableData global
     let accumulatedData = [];
+    let isAutoSyncRunning = false; // Flag for automation mode
 
 
     const extractRenewalTableData = () => {
@@ -1521,6 +2065,11 @@ const handleCustomMonthClick = () => {
         // 🚀 Add Live Extraction Modal
         const extModal = document.createElement('div');
         extModal.id = 'liveExtractModal';
+
+        // Show minimize button whenever any extraction starts
+        const minBtn = document.getElementById('toggleMinimizeBtn');
+        if (minBtn) minBtn.style.display = 'block';
+
         Object.assign(extModal.style, {
           marginTop: '10px', width: '100%', padding: '10px', 
           background: '#e3f2fd', border: '1px solid #90caf9', 
@@ -1537,6 +2086,8 @@ const handleCustomMonthClick = () => {
         `;
         popup.appendChild(extModal);
         
+        // 🚀 SHOW ENTERTAINMENT OVERLAY
+        createExtractionOverlay();
       } else {
         console.warn('Popup not found!');
         return;
@@ -1591,13 +2142,25 @@ const handleCustomMonthClick = () => {
           const liveExtRows = document.getElementById('liveExtRows');
           const liveExtTotal = document.getElementById('liveExtTotal');
           if (liveExtRows) liveExtRows.innerText = rows.length;
-          if (liveExtTotal) liveExtTotal.innerText = tableData.length;
+          if (liveExtTotal) {
+             liveExtTotal.innerText = tableData.length;
+             // 🚀 Update compact bar during extraction too!
+             updateMinimizedStatus();
+          }
         }
         // Initial setup for the loop
         let currentPageNum = 1;
 
         function finishExtractionSuccess() {
             console.log('Finished extracting all pages.');
+            isExtractionPhaseDone = true;
+
+            // If user is NOT playing, remove overlay immediately.
+            // If they are playing, the match end logic or this will take care of it later.
+            if (!isGamePlaying) {
+                removeExtractionOverlay();
+            }
+
             const copiedData = JSON.parse(JSON.stringify(tableData));
 
             // Add and remove duplicates
@@ -1618,12 +2181,48 @@ const handleCustomMonthClick = () => {
                liveModal.style.background = '#e8f5e9'; // Light green
                liveModal.style.borderColor = '#81c784';
                liveModal.innerHTML = `
-                  <h4 style="margin:0 0 8px 0; color:#2e7d32; font-size:16px;">Extraction Complete!</h4>
-                  <div style="font-size:13px; color:#333; line-height:1.6; font-weight:bold;">
-                     <p style="margin:0;">Total Pages Scanned: <span style="color:#1565c0;">${currentPageNum}</span></p>
-                     <p style="margin:0;">Total Leads Extracted: <span style="color:#d32f2f;">${accumulatedData.length}</span></p>
+                  <div style="position:relative;">
+                      <button id="clearExtDataBtn" title="Clear All Data" style="position:absolute; top:-5px; right:-5px; background:none; border:none; cursor:pointer; color:#d32f2f; font-size:18px; padding:5px;">
+                        <i class="fi fi-rr-trash"></i>
+                      </button>
+                      <h4 style="margin:0 0 8px 0; color:#2e7d32; font-size:16px;">Extraction Complete!</h4>
+                      <div style="font-size:13px; color:#333; line-height:1.6; font-weight:bold;">
+                         <p style="margin:0;">Total Pages Scanned: <span style="color:#1565c0;">${currentPageNum}</span></p>
+                         <p style="margin:0;">Total Leads Extracted: <span style="color:#d32f2f;">${accumulatedData.length}</span></p>
+                      </div>
                   </div>
                `;
+
+               // Cleanup/Clear Data Event
+               document.getElementById('clearExtDataBtn')?.addEventListener('click', () => {
+                  if (confirm('Are you sure you want to clear all extracted data?')) {
+                      accumulatedData = [];
+                      tableData = [];
+                      
+                      // Remove current extraction status & results UI
+                      document.getElementById('completedExtractModal')?.remove();
+                      const messageDiv = document.getElementById('messageDiv');
+                      if (messageDiv) messageDiv.remove();
+                      const secBtn = document.querySelector('#secActBtn');
+                      if (secBtn) secBtn.remove();
+
+                      const popup = document.getElementById('my-dashboard-popup');
+                      if (popup) {
+                          // 🚀 Step 1: Redirect to Dashboard link physically on the website
+                          const dashboardLink = document.querySelector('.side_dash_navigation .dropdown11');
+                          if (dashboardLink) dashboardLink.click();
+                          document.getElementById('sidebarwrapper')?.classList.remove('toggled');
+                          document.getElementById('sideBackdrop')?.classList.remove('backdrop1');
+                          
+                          // 🚀 Step 2: Show Main Menu (Original Button UI)
+                          const actionUI = createButtonContainer();
+                          popup.appendChild(actionUI);
+                          actionUI.style.display = 'flex';
+                      }
+                      
+                      console.log('🗑️ All extracted data cleared and redirected to home.');
+                   }
+               });
             }
     
             let messageDiv = document.getElementById('messageDiv');
@@ -1634,6 +2233,15 @@ const handleCustomMonthClick = () => {
             secondaryButtonContainer.style.display = 'block';
 
             setTimeout(() => spinner.remove(), 1000);
+
+            // 🚀 If we are in Auto-Mode, automatically trigger the API upload!
+            if (isAutoSyncRunning) {
+                console.log('⚡ AutoSync: Extraction complete. Starting automatic API upload...');
+                isAutoSyncRunning = false; // Reset the flag
+                setTimeout(() => {
+                   sendDataToAppScript();
+                }, 2500); // 2.5s delay to let user see success message
+            }
         }
 
         function pauseExtractionWithError(errorMsg, failedPage) {
@@ -1681,23 +2289,20 @@ const handleCustomMonthClick = () => {
           // STEP 1: Extract current data physically present on the screen
           extractTableData();
 
-          // STEP 2: Find the NEXT page button directly
-          const nextPageNum = currentPageNum + 1;
-          const paginationLinks = document.querySelectorAll('.pagination .page-item a.page-link');
-          
-          let nextButton = null;
-          for (let i = 0; i < paginationLinks.length; i++) {
-             if (paginationLinks[i].textContent.trim() === String(nextPageNum)) {
-                nextButton = paginationLinks[i];
-                break;
-             }
-          }
+          // STEP 2: Find the NEXT page button via aria-label
+          const nextButtonLink = document.querySelector('.pagination .page-item a[aria-label="Next"]');
+          const nextLi = nextButtonLink ? nextButtonLink.parentElement : null;
+          const isNextDisabled = nextLi && nextLi.classList.contains('disabled');
 
-          // STEP 3: If no next button exists, extraction is completely finished
-          if (!nextButton) {
+          // STEP 3: If no next button exists OR it is disabled, extraction is completely finished
+          if (!nextButtonLink || isNextDisabled) {
+            console.log('No more pages found (Next button is disabled or missing).');
             finishExtractionSuccess();
             return;
           }
+
+          const nextPageNum = currentPageNum + 1;
+          let nextButton = nextButtonLink;
 
           // STEP 4: Move to next page if available
           console.log(`Moving to Page ${nextPageNum}...`);
@@ -1729,8 +2334,9 @@ const handleCustomMonthClick = () => {
               }
               
               // Grace period for React to stabilize the DOM
-              setTimeout(() => {
-                currentPageNum = nextPageNum;
+                setTimeout(() => {
+                  if (!extensionGlobalActive) return; // 🛡️ Stop if extension closed
+                  currentPageNum = nextPageNum;
                 
                 const livePage = document.getElementById('liveExtPage');
                 if (livePage) livePage.innerText = currentPageNum;
@@ -1739,11 +2345,12 @@ const handleCustomMonthClick = () => {
                 processNextPage();
               }, 1000); 
             }
+            if (!extensionGlobalActive) clearInterval(checkDataLoaded);
           }, 500);
         }
     
         // Start the infinite loop engine
-        processNextPage();
+        if (extensionGlobalActive) processNextPage();
       }, 3000);
 
     };
@@ -1789,26 +2396,44 @@ const handleCustomMonthClick = () => {
         updateProgress(0, 0, accumulatedData.length);  // Start from 0%
       }, 100);
     
-      // Send data to background
-      chrome.runtime.sendMessage({
-        type: 'TABLE_DATA',
-        payload: accumulatedData
-      });
+      // 📦 Verify context validity before sending
+      if (!chrome.runtime?.id) {
+         console.warn('-- Extension Context Invalidated. Refresh needed. --');
+         if (messageDiv) {
+            messageDiv.innerHTML = `<div style="color:#d32f2f; padding:20px; font-weight:bold;">⚠️ Connection Lost.<br>This usually happens when the extension is updated.<br>Please Refresh the page to synchronize.</div>`;
+         } else {
+            alert('Extension connection lost. Please refresh the page.');
+         }
+         return;
+      }
+
+      try {
+          // Send data to background
+          chrome.runtime.sendMessage({
+            type: 'TABLE_DATA',
+            payload: accumulatedData
+          });
+      } catch (e) {
+          console.error('Failed to send message:', e);
+      }
     }
     
     
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!chrome.runtime?.id) return; // Safety check
       if (message.type === 'UPLOAD_PROGRESS') {
-        updateProgress(message.payload.progressPercent, message.payload.uploadedCount, message.payload.totalCount);
+        updateProgress(message.payload.progressPercent, message.payload.uploadedCount, message.payload.totalCount, message.payload.estSecondsLeft, message.payload.currentLead);
       } else if (message.type === 'UPLOAD_ERROR') {
         handleUploadErrorUI(message.payload);
       } else if (message.type === 'UPLOAD_COMPLETE') {
-        updateProgress(100, message.payload.total, message.payload.total);
+        updateProgress(100, message.payload.total, message.payload.total, 0);
       }
     });
 
     function handleUploadErrorUI(payload) {
+      if (countdownInterval) clearInterval(countdownInterval);
+      removeExtractionOverlay(); // 🚀 Force remove game overlay on error
       const summaryDiv = document.getElementById('uploadSummaryDiv');
       const pauseBtn = document.getElementById('pauseUploadBtn');
       const resumeBtn = document.getElementById('resumeUploadBtn');
@@ -1820,6 +2445,10 @@ const handleCustomMonthClick = () => {
       if (restartBtn) restartBtn.style.display = 'block';
       if (dots) dots.style.display = 'none';
 
+      // ⚡ Show mini auto-sync button again on error
+      const miniBtn = document.getElementById('miniAutoSyncBtn');
+      if (miniBtn) miniBtn.style.display = 'flex';
+
       if (summaryDiv) {
         summaryDiv.style.display = 'block';
         summaryDiv.style.color = '#c62828'; // red
@@ -1828,10 +2457,67 @@ const handleCustomMonthClick = () => {
       }
     }
 
-    function updateProgress(percent, uploadedCount = 0, totalCount = 0) {
+    let countdownInterval = null;
+    let globalRemainingSeconds = 0;
+
+    function formatTime(totalSeconds) {
+       if (totalSeconds <= 0) return '0s';
+       const h = Math.floor(totalSeconds / 3600);
+       const m = Math.floor((totalSeconds % 3600) / 60);
+       const s = totalSeconds % 60;
+       
+       let res = '';
+       if (h > 0) res += `${h}h `;
+       if (m > 0) res += `${m}m `;
+       if (s > 0 || res === '') res += `${s}s`;
+       return res.trim();
+    }
+
+    function updateProgress(percent, uploadedCount = 0, totalCount = 0, estSecondsLeft = null, currentLead = null) {
       const inner = document.getElementById('progressInner');
       const progressText = document.getElementById('uploadProgressText');
+      const estTimeText = document.getElementById('estTimeText');
       const summaryDiv = document.getElementById('uploadSummaryDiv');
+      const leadInfo = document.getElementById('currentLeadInfo');
+
+      // 🏠 Update Live Lead Info
+      if (leadInfo && currentLead) {
+          const keys = Object.keys(currentLead);
+          
+          // 🔎 Prioritize the exact headers from your data schema
+          const proposalKey = keys.find(k => k === 'PROPOSAL_NO.' || k.includes('PROPOSAL')) || keys[0];
+          const nameKey = keys.find(k => k === 'CUSTOMER_NAME' || (k.includes('CUSTOMER') && k.includes('NAME'))) || keys[1];
+          
+          const pNo = currentLead[proposalKey] || '-';
+          const cName = currentLead[nameKey] || '-';
+          
+          leadInfo.innerHTML = `<span style="color:#0065b3;">${pNo}</span> &nbsp;|&nbsp; <span style="color:#616161;">${cName}</span>`;
+      }
+
+      if (estSecondsLeft !== null) {
+         globalRemainingSeconds = estSecondsLeft;
+         if (estTimeText) estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}`;
+         
+         // 🚀 Check if we are paused. If paused, DON'T start the countdown interval.
+         const resumeBtn = document.getElementById('resumeUploadBtn');
+         const isPaused = resumeBtn && resumeBtn.style.display !== 'none';
+
+         if (countdownInterval) clearInterval(countdownInterval);
+         
+         if (!isPaused) {
+             countdownInterval = setInterval(() => {
+                if (globalRemainingSeconds > 0) {
+                   globalRemainingSeconds--;
+                   if (estTimeText) { 
+                      estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}`;
+                      updateMinimizedStatus();
+                   }
+                } else {
+                   clearInterval(countdownInterval);
+                }
+             }, 1000);
+         }
+      }
       
       if (progressText && totalCount > 0) {
         progressText.innerText = `Total Leads: ${totalCount} | Uploaded: ${uploadedCount} | ${percent}%`;
@@ -1842,23 +2528,21 @@ const handleCustomMonthClick = () => {
         }
       }
 
+      // 🚀 ALWAYS UPDATE MINIMIZED BAR IF ACTIVE
+      updateMinimizedStatus();
+
       if (!inner) return;
     
       inner.style.width = percent + '%';
       console.log(`Progress updated to ${percent}%`);
     
       if (percent === 100) {
-        // Listen for transition end
-        inner.addEventListener('transitionend', function onTransitionEnd() {
-          // Remove listener so it only runs once
-          inner.removeEventListener('transitionend', onTransitionEnd);
-
           const buttonContainer = document.getElementById('secActBtn');
           if (buttonContainer) {
             buttonContainer.style.display = 'block';
           }
     
-          // Delay wait before success msg
+          // 🚀 Direct success message update (Don't wait for transitionend as it might not fire if hidden)
           setTimeout(() => {
             const messageDiv = document.getElementById('messageDiv');
             if (!messageDiv) return;
@@ -1876,7 +2560,7 @@ const handleCustomMonthClick = () => {
     
             // Animated check icon
             const checkIcon = document.createElement('i');
-            checkIcon.className = 'fi fi-br-check animated-check';
+            checkIcon.className = 'fi flex fi-br-check animated-check'; // Added flex class
             checkIcon.style.fontSize = '28px';
     
             // Inject animation CSS once
@@ -1906,8 +2590,7 @@ const handleCustomMonthClick = () => {
             successDiv.appendChild(checkIcon);
             successDiv.appendChild(messageText);
             messageDiv.appendChild(successDiv);
-          }, 500); // Delay after transition ends
-        });
+          }, 600); 
       }
     }
     
@@ -2034,17 +2717,379 @@ const handleCustomMonthClick = () => {
       table.appendChild(tbody);
       container.appendChild(table);
     };
-    
 
+
+    // 📢 Banner & Backdrop Cleaner (Continuous Watcher)
+    let globalCleanerActive = false;
+    const startGlobalCleaner = () => {
+        if (globalCleanerActive) return;
+        globalCleanerActive = true;
+        
+        const observer = new MutationObserver(() => {
+            // Clean banners
+            const banner = document.getElementById('myBannersModal');
+            if (banner) {
+                const btn = banner.querySelector('button.close[data-bs-dismiss="modal"]');
+                if (btn && banner.style.display !== 'none') {
+                    console.log('📢 Mutation: Banner detected. Closing...');
+                    btn.click();
+                }
+            }
+        });
+        
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
 
 
   
+    // 🎮 Tic-Tac-Toe Overlay Variables
+    let isExtractionPhaseDone = false;
+    let isGamePlaying = false;
+    let extractionOverlayEl = null;
+    let tttBoard = Array(9).fill(null);
+    let tttCurrentTurn = 'X'; // Human is X
+
+    const removeExtractionOverlay = () => {
+        if (extractionOverlayEl) {
+            extractionOverlayEl.style.opacity = '0';
+            setTimeout(() => {
+                extractionOverlayEl?.remove();
+                extractionOverlayEl = null;
+            }, 500);
+        }
+    };
+
+    const createExtractionOverlay = () => {
+        if (extractionOverlayEl) return;
+        isExtractionPhaseDone = false;
+        isGamePlaying = false;
+        tttBoard = Array(9).fill(null);
+
+        const overlay = document.createElement('div');
+        overlay.id = 'extraction-game-overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+            backgroundColor: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(10px)',
+            zIndex: '10001', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', color: '#fff',
+            fontFamily: 'sans-serif', transition: 'all 0.5s ease', opacity: '1'
+        });
+
+        overlay.innerHTML = `
+            <div id="ttt-intro-box" style="text-align:center; max-width:400px; padding:20px; animation:fadeIn 0.8s ease;">
+                <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
+                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both;"></div>
+                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.2s;"></div>
+                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.4s;"></div>
+                </div>
+                <p style="font-size:16px; line-height:1.6; color:rgba(255,255,255,0.9); margin-bottom:25px;">
+                    Sorry for the inconvenience, this scanning process will take a short amount of time. 
+                    Want to play a quick game while we work?
+                </p>
+                <button id="start-ttt-btn" style="
+                    padding:12px 30px; border:none; border-radius:30px; 
+                    background: linear-gradient(135deg, #00c853, #64dd17); 
+                    color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                    box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
+                    Play Tic-Tac-Toe
+                </button>
+            </div>
+            
+            <div id="ttt-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
+                <h3 id="ttt-status" style="margin-bottom:20px; color:#e3f2fd;">Your Turn (X)</h3>
+                <div id="ttt-grid-wrapper" style="position:relative; display:inline-block;">
+                    <div id="ttt-grid" style="
+                        display:grid; grid-template-columns: repeat(3, 100px); 
+                        grid-template-rows: repeat(3, 100px); gap:10px; 
+                        background:rgba(255,255,255,0.1); padding:10px; border-radius:15px;
+                        border: 2px solid rgba(255,255,255,0.2);">
+                        ${Array(9).fill(0).map((_, i) => `<div class="ttt-cell" data-index="${i}" style="
+                            width:100px; height:100px; background:rgba(255,255,255,0.05);
+                            border-radius:10px; display:flex; align-items:center; justify-content:center;
+                            font-size:40px; font-weight:bold; cursor:pointer; transition:0.2s;"></div>`).join('')}
+                    </div>
+                    <!-- ✍️ Winning Line -->
+                    <div id="ttt-win-line" style="
+                        position:absolute; background:#fff; height:6px; border-radius:3px;
+                        display:none; pointer-events:none; transition: width 0.5s ease, opacity 0.3s;
+                        box-shadow: 0 0 15px #fff, 0 0 30px #4fc3f7; z-index:10; transform-origin: left center;">
+                    </div>
+                </div>
+                <div id="ttt-msg" style="margin-top:20px; font-weight:bold; min-height:60px;"></div>
+            </div>
+
+            <style>
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes zoomIn { from { transform: scale(0.8); opacity:0; } to { transform: scale(1); opacity:1; } }
+                @keyframes dot-dance { 0%, 80%, 100% { transform: scale(0); opacity: 0.3; } 40% { transform: scale(1); opacity: 1; } }
+                @keyframes glitter-fall { 0% { transform: translateY(-50px) rotate(0deg); opacity: 1; } 100% { transform: translateY(600px) rotate(720deg); opacity: 0; } }
+                @keyframes win-scale { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+                .ttt-cell:hover { background: rgba(255,255,255,0.15) !important; transform: scale(0.95); }
+                .ttt-cell.taken { cursor: default; }
+                .ttt-celebration-text { animation: win-scale 1s infinite ease-in-out; font-size: 24px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+                .glitter { position: fixed; width: 10px; height: 10px; pointer-events: none; z-index: 10005; animation: glitter-fall 2s ease-out forwards; }
+            </style>
+        `;
+
+        document.body.appendChild(overlay);
+        extractionOverlayEl = overlay;
+
+        const playGameSound = (type) => {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const playTone = (freq, duration, type='sine') => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                    
+                    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+                    
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + duration);
+                };
+
+                if (type === 'X') playTone(600, 0.1, 'sine'); // High beep
+                else if (type === 'O') playTone(400, 0.1, 'sine'); // Low beep
+                else if (type === 'win') {
+                   [600, 800, 1000].forEach((f, i) => setTimeout(() => playTone(f, 0.3), i * 150));
+                } else if (type === 'draw') {
+                   [400, 300, 200].forEach((f, i) => setTimeout(() => playTone(f, 0.3), i * 150));
+                }
+            } catch (e) {
+                console.warn('Web Audio API blocked or failed:', e);
+            }
+        };
+
+        // Event Listeners
+        const startBtn = overlay.querySelector('#start-ttt-btn');
+        startBtn.addEventListener('click', () => {
+            isGamePlaying = true;
+            overlay.querySelector('#ttt-intro-box').style.display = 'none';
+            overlay.querySelector('#ttt-game-container').style.display = 'block';
+            
+            // 🚀 Warm-up AudioContext (unlocks sound policy)
+            playGameSound('X'); 
+        });
+
+        const launchCelebration = (isWin) => {
+            if (!isWin) return;
+            const colors = ['#fff', '#ffd700', '#ffeb3b', '#4fc3f7', '#b9f6ca', '#ff8a65'];
+            for (let i = 0; i < 40; i++) {
+                const g = document.createElement('div');
+                g.className = 'glitter';
+                g.style.left = Math.random() * 100 + 'vw';
+                g.style.top = '-20px';
+                g.style.background = colors[Math.floor(Math.random() * colors.length)];
+                g.style.transform = `rotate(${Math.random() * 360}deg)`;
+                g.style.animationDelay = Math.random() * 2 + 's';
+                document.body.appendChild(g);
+                setTimeout(() => g.remove(), 4000);
+            }
+        };
+
+        const cells = overlay.querySelectorAll('.ttt-cell');
+        cells.forEach(cell => {
+            cell.addEventListener('click', () => {
+                const index = cell.dataset.index;
+                if (tttBoard[index] || tttCurrentTurn !== 'X' || !isGamePlaying) return;
+
+                makeMove(index, 'X');
+                if (!checkGameEnd()) {
+                    tttCurrentTurn = 'O';
+                    const sTxt = document.getElementById('ttt-status');
+                    if (sTxt) sTxt.innerText = "Computer's Turn...";
+                    setTimeout(makeComputerMove, 800);
+                }
+            });
+        });
+
+        function makeMove(index, player) {
+            tttBoard[index] = player;
+            const targetCell = document.querySelector(`.ttt-cell[data-index="${index}"]`);
+            if (targetCell) {
+                targetCell.innerText = player;
+                targetCell.style.color = player === 'X' ? '#4fc3f7' : '#ff8a65';
+                targetCell.classList.add('taken');
+                playGameSound(player); // 🎵 Play move sound
+            }
+        }
+
+        function getWinner(b) {
+            const patterns = [[0,1,2], [3,4,5], [6,7,8], [0,3,6], [1,4,7], [2,5,8], [0,4,8], [2,4,6]];
+            for (const p of patterns) {
+                if (b[p[0]] && b[p[0]] === b[p[1]] && b[p[0]] === b[p[2]]) return b[p[0]];
+            }
+            return null;
+        }
+
+        function minimax(board, depth, isMaximizing) {
+            const result = getWinner(board);
+            if (result === 'O') return 10 - depth;
+            if (result === 'X') return depth - 10;
+            if (!board.includes(null)) return 0;
+
+            if (isMaximizing) {
+                let bestScore = -Infinity;
+                for (let i = 0; i < 9; i++) {
+                    if (board[i] === null) {
+                        board[i] = 'O';
+                        let score = minimax(board, depth + 1, false);
+                        board[i] = null;
+                        bestScore = Math.max(score, bestScore);
+                    }
+                }
+                return bestScore;
+            } else {
+                let bestScore = Infinity;
+                for (let i = 0; i < 9; i++) {
+                    if (board[i] === null) {
+                        board[i] = 'X';
+                        let score = minimax(board, depth + 1, true);
+                        board[i] = null;
+                        bestScore = Math.min(score, bestScore);
+                    }
+                }
+                return bestScore;
+            }
+        }
+
+        function makeComputerMove() {
+            if (!isGamePlaying) return;
+            
+            let bestScore = -Infinity;
+            let move;
+            for (let i = 0; i < 9; i++) {
+                if (tttBoard[i] === null) {
+                    tttBoard[i] = 'O';
+                    let score = minimax(tttBoard, 0, false);
+                    tttBoard[i] = null;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        move = i;
+                    }
+                }
+            }
+            
+            if (move !== undefined) {
+                makeMove(move, 'O');
+                if (!checkGameEnd()) {
+                    tttCurrentTurn = 'X';
+                    const sTxt = document.getElementById('ttt-status');
+                    if (sTxt) sTxt.innerText = "Your Turn (X)";
+                }
+            }
+        }
+
+        function checkGameEnd() {
+            const winPatterns = [
+                {p:[0,1,2], type:'h', pos:55}, {p:[3,4,5], type:'h', pos:165}, {p:[6,7,8], type:'h', pos:275},
+                {p:[0,3,6], type:'v', pos:55}, {p:[1,4,7], type:'v', pos:165}, {p:[2,5,8], type:'v', pos:275},
+                {p:[0,4,8], type:'d1'}, {p:[2,4,6], type:'d2'}
+            ];
+
+            let winningPattern = null;
+            let winner = null;
+
+            for (const item of winPatterns) {
+                const [a, b, c] = item.p;
+                if (tttBoard[a] && tttBoard[a] === tttBoard[b] && tttBoard[a] === tttBoard[c]) {
+                    winner = tttBoard[a];
+                    winningPattern = item;
+                    break;
+                }
+            }
+
+            const msgEl = document.getElementById('ttt-msg');
+            const winLine = document.getElementById('ttt-win-line');
+
+            if (winner || !tttBoard.includes(null)) {
+                isGamePlaying = false;
+                
+                // ✍️ Draw Winning Line
+                if (winner && winLine) {
+                    winLine.style.display = 'block';
+                    winLine.style.background = winner === 'X' ? '#4fc3f7' : '#ff8a65';
+                    winLine.style.boxShadow = `0 0 15px ${winLine.style.background}`;
+                    
+                    if (winningPattern.type === 'h') {
+                        Object.assign(winLine.style, { top: `${winningPattern.pos}px`, left: '10px', width: '300px', transform: 'rotate(0deg)' });
+                    } else if (winningPattern.type === 'v') {
+                        Object.assign(winLine.style, { top: '10px', left: `${winningPattern.pos}px`, width: '300px', transform: 'rotate(90deg)' });
+                    } else if (winningPattern.type === 'd1') {
+                        Object.assign(winLine.style, { top: '15px', left: '15px', width: '400px', transform: 'rotate(45deg)' });
+                    } else if (winningPattern.type === 'd2') {
+                        Object.assign(winLine.style, { top: '15px', left: '305px', width: '400px', transform: 'rotate(135deg)' });
+                    }
+                }
+
+                // 🎵 Play match-end sounds
+                if (winner === 'X') {
+                    playGameSound('win');
+                    launchCelebration(true);
+                } else {
+                    playGameSound('draw');
+                }
+
+                let finalMsg = winner ? (winner === 'X' ? "🎉 YOU WON!" : "🤖 BOT WON!") : "🤝 DRAW!";
+                if (msgEl) {
+                    msgEl.innerHTML = `<div class="ttt-celebration-text" style="color:${winner === 'X' ? '#b9f6ca' : (winner ? '#ffccbc' : '#fff')}">${finalMsg}</div>`;
+                    
+                    if (isExtractionPhaseDone) {
+                        setTimeout(removeExtractionOverlay, 2500);
+                    } else {
+                        const resetBtn = document.createElement('button');
+                        resetBtn.innerText = '↺ Play Again';
+                        Object.assign(resetBtn.style, {
+                            marginTop: '15px', padding: '10px 25px', border: 'none', 
+                            borderRadius: '25px', background: 'linear-gradient(135deg, #00c853, #64dd17)', 
+                            color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold',
+                            boxShadow: '0 4px 15px rgba(0,200,83,0.3)', transition: 'transform 0.2s'
+                        });
+                        resetBtn.onmouseover = () => resetBtn.style.transform = 'scale(1.1)';
+                        resetBtn.onmouseout = () => resetBtn.style.transform = 'scale(1)';
+                        
+                        resetBtn.onclick = () => {
+                            tttBoard = Array(9).fill(null);
+                            tttCurrentTurn = 'X';
+                            isGamePlaying = true;
+                            if (msgEl) msgEl.innerHTML = '';
+                            if (winLine) winLine.style.display = 'none';
+                            const statusText = document.getElementById('ttt-status');
+                            if (statusText) statusText.innerText = "Your Turn (X)";
+                            document.querySelectorAll('.ttt-cell').forEach(c => {
+                                c.innerText = '';
+                                c.classList.remove('taken');
+                            });
+                        };
+                        msgEl.appendChild(document.createElement('br'));
+                        msgEl.appendChild(resetBtn);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+    };
+
     // ====== MAIN RUNNER ======
     const runPopup = () => {
+      // 🚀 Initial Cleanup
+      startGlobalCleaner(); // 🚀 Start watching for async banners
+
       if (window.location.href === 'https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard') {
         if (!document.getElementById('my-dashboard-popup')) {
           const { popup, nameSpan, spinner, buttonContainer } = createPopup();
           addSpinnerStyle();
+          toggleMinimize(); // 🚀 Default to Minimized view on startup
+          
           setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
         }
       }
@@ -2069,5 +3114,26 @@ const handleCustomMonthClick = () => {
     loadIconCDN();
     runPopup();
   
-  })();
+    // ====== AUTO RUN ON STARTUP (2-HOUR COOLDOWN) ======
+    const AUTO_RUN_KEY = 'last_auto_sync_time';
+    const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 Hours in ms
+    
+    const lastRun = localStorage.getItem(AUTO_RUN_KEY);
+    const currentTime = Date.now();
+
+    if (!lastRun || (currentTime - parseInt(lastRun) > COOLDOWN_MS)) {
+        setTimeout(() => {
+            const popup = document.getElementById('my-dashboard-popup');
+            if (popup) {
+               console.log("🚀 Automation: 2-hour cooldown passed. Starting 1-Month Sync...");
+               localStorage.setItem(AUTO_RUN_KEY, Date.now().toString()); // Update timestamp
+               handleAutoSyncClick(popup);
+            }
+        }, 8000); // 8 Sec delay to ensure agent name and DOM is ready
+    } else {
+        const minsLeft = Math.round((COOLDOWN_MS - (currentTime - parseInt(lastRun))) / 60000);
+        console.log(`⏳ Auto-pilot on cooldown. Next run in ~${minsLeft} minutes.`);
+    }
+
+})();
   

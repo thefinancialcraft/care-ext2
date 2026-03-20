@@ -49,11 +49,25 @@ let uploadState = {
   total: 0,
   uploaded: 0,
   currentIndex: 0,
-  chunkSize: 10, // Chunk size can be adjusted
+  chunkSize: 10, // 🚀 Process 1 by 1 for better tracking and resume logic
   isPaused: false,
   isError: false,
   errorMessage: ''
 };
+
+function syncStateToStorage() {
+  chrome.storage.local.set({ 
+    tableDataToUpload, 
+    uploadState 
+  });
+}
+
+// 📦 Try to restore state on Service Worker startup
+chrome.storage.local.get(['tableDataToUpload', 'uploadState'], (result) => {
+  if (result.tableDataToUpload) tableDataToUpload = result.tableDataToUpload;
+  if (result.uploadState) uploadState = result.uploadState;
+  console.log('📦 Background state restored from storage');
+});
 
 function startUploadLoop() {
   if (uploadState.currentIndex >= uploadState.total) {
@@ -62,11 +76,13 @@ function startUploadLoop() {
       total: uploadState.total,
       uploaded: uploadState.uploaded
     });
+    syncStateToStorage();
     return;
   }
 
   if (uploadState.isPaused) {
     console.log('⏸ Upload Paused at index', uploadState.currentIndex);
+    syncStateToStorage();
     return; // Wait for resume
   }
 
@@ -77,6 +93,7 @@ function startUploadLoop() {
 
   if (chunk.length === 0) return;
 
+  const startTime = Date.now();
   const encodedChunk = 'data=' + encodeURIComponent(JSON.stringify(chunk));
 
   fetch('https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec', {
@@ -87,19 +104,35 @@ function startUploadLoop() {
   .then(response => response.json())
   .then(result => {
     if (result.status === 'success') {
+      const timeTaken = Date.now() - startTime;
+      
+      // Update the running average for chunk time
+      if (!uploadState.avgChunkTime) {
+         uploadState.avgChunkTime = timeTaken + 1000; // adding the delay as well
+      } else {
+         uploadState.avgChunkTime = (uploadState.avgChunkTime * 0.7) + ((timeTaken + 1000) * 0.3);
+      }
+
       uploadState.uploaded += chunk.length;
       uploadState.currentIndex += uploadState.chunkSize;
       
+      const remainingLeads = uploadState.total - uploadState.uploaded;
+      const remainingChunks = Math.ceil(remainingLeads / uploadState.chunkSize);
+      const estSecondsLeft = Math.ceil((remainingChunks * uploadState.avgChunkTime) / 1000);
+
       const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
       
-      console.log(`🔄 Uploading... ${uploadState.uploaded}/${uploadState.total} rows (${percent}%)`);
+      console.log(`🔄 Uploading... ${uploadState.uploaded}/${uploadState.total} rows (${percent}%) | Time: ${estSecondsLeft}s left`);
 
       sendUpdateToContent('UPLOAD_PROGRESS', {
         progressPercent: percent,
         uploadedCount: uploadState.uploaded,
-        totalCount: uploadState.total
+        totalCount: uploadState.total,
+        estSecondsLeft: estSecondsLeft,
+        currentLead: chunk[0] // 🏠 Send current lead data for live display
       });
 
+      syncStateToStorage();
       // Avoid blocking, schedule next chunk
       setTimeout(startUploadLoop, 1000);
     } else {
@@ -123,6 +156,7 @@ function handleUploadError(errMsg) {
     error: errMsg,
     index: uploadState.currentIndex
   });
+  syncStateToStorage();
 }
 
 let sourceTabId = null;
@@ -151,27 +185,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       total: tableDataToUpload.length,
       uploaded: 0,
       currentIndex: 0,
-      chunkSize: 10,
+      chunkSize: 10, // 🚀 1 by 1 for precise tracking and pausing
       isPaused: false,
       isError: false,
       errorMessage: ''
     };
+    syncStateToStorage();
     startUploadLoop();
   }
   else if (message.type === 'PAUSE_UPLOAD') {
     uploadState.isPaused = true;
+    syncStateToStorage();
     sendResponse({status: "paused"});
   }
   else if (message.type === 'RESUME_UPLOAD') {
-    uploadState.isPaused = false;
-    uploadState.isError = false; 
-    startUploadLoop();
+    chrome.storage.local.get(['tableDataToUpload', 'uploadState'], (result) => {
+      if (result.tableDataToUpload) tableDataToUpload = result.tableDataToUpload;
+      if (result.uploadState) uploadState = result.uploadState;
+      
+      uploadState.isPaused = false;
+      uploadState.isError = false; 
+      syncStateToStorage();
+      startUploadLoop();
+    });
   }
   else if (message.type === 'RESTART_UPLOAD') {
     uploadState.isPaused = false;
     uploadState.isError = false;
     uploadState.uploaded = 0;
     uploadState.currentIndex = 0;
+    syncStateToStorage();
     startUploadLoop();
   }
 });
