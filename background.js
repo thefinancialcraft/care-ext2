@@ -52,7 +52,9 @@ let uploadState = {
   chunkSize: 10, // 🚀 Process 1 by 1 for better tracking and resume logic
   isPaused: false,
   isError: false,
-  errorMessage: ''
+  errorMessage: '',
+  isLoopRunning: false,
+  chunkHistory: [] // 📈 Track history for the graph
 };
 
 function syncStateToStorage() {
@@ -66,12 +68,27 @@ function syncStateToStorage() {
 chrome.storage.local.get(['tableDataToUpload', 'uploadState'], (result) => {
   if (result.tableDataToUpload) tableDataToUpload = result.tableDataToUpload;
   if (result.uploadState) uploadState = result.uploadState;
-  console.log('📦 Background state restored from storage');
+  const count = tableDataToUpload ? tableDataToUpload.length : 0;
+  console.log(`%c[SYSTEM] %cMemory Restored: %c${count} leads found.`, "color:#9c27b0; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#9c27b0; font-weight:bold;");
 });
 
 function startUploadLoop() {
+  if (uploadState.isLoopRunning && !uploadState.isPaused && !uploadState.isError) {
+      console.warn('⚠️ Loop already running. Check in-flight request.');
+      return; 
+  }
+
   if (uploadState.currentIndex >= uploadState.total) {
-    console.log('✅ Upload complete.');
+    const totalTime = ((Date.now() - (uploadState.sessionStartTime || Date.now())) / 1000).toFixed(1);
+    const avgSpeed = (uploadState.total / totalTime).toFixed(2);
+
+    console.group(`%c🏁 SESSION COMPLETE | Final Audit`, "background:#f1c40f; color:white; padding:2px 5px; font-weight:bold; border-radius:3px;");
+    console.log(`%c✅ Total Successfully Uploaded: %c${uploadState.uploaded}/${uploadState.total}`, "color:#e67e22; font-weight:bold;", "color:#f1c40f; font-weight:bold;");
+    console.log(`%c⏱️ Total Session Duration: %c${totalTime}s`, "color:#e67e22; font-weight:bold;", "color:#0065b3; font-weight:bold;");
+    console.log(`%c🚀 Effective Upload Speed: %c${avgSpeed} leads/sec`, "color:#e67e22; font-weight:bold;", "color:#ff9800; font-weight:bold;");
+    console.groupEnd();
+
+    uploadState.isLoopRunning = false;
     sendUpdateToContent('UPLOAD_COMPLETE', {
       total: uploadState.total,
       uploaded: uploadState.uploaded
@@ -82,71 +99,128 @@ function startUploadLoop() {
 
   if (uploadState.isPaused) {
     console.log('⏸ Upload Paused at index', uploadState.currentIndex);
+    uploadState.isLoopRunning = false;
     syncStateToStorage();
     return; // Wait for resume
   }
 
+  uploadState.isLoopRunning = true;
   const chunk = tableDataToUpload.slice(
     uploadState.currentIndex,
     uploadState.currentIndex + uploadState.chunkSize
   );
 
-  if (chunk.length === 0) return;
+  if (chunk.length === 0) {
+    console.log('🏁 Batch empty. All leads uploaded.');
+    uploadState.isLoopRunning = false;
+    return;
+  }
 
   const startTime = Date.now();
+  const batchNum = Math.floor(uploadState.currentIndex / uploadState.chunkSize) + 1;
+  const totalBatches = Math.ceil(uploadState.total / uploadState.chunkSize);
+
+  console.group(`%c🚀 BATCH ${batchNum}/${totalBatches} (%c${chunk.length} leads%c)`, "color:#0065b3; font-weight:bold;", "color:#e91e63; font-weight:bold;", "color:#0065b3;");
+  console.log(`---------------------------------------------------------`);
+  
   const encodedChunk = 'data=' + encodeURIComponent(JSON.stringify(chunk));
+  console.log(`%c📤 [BG -> APPSCRIPT] %cSending Payload...`, "color:#f1c40f; font-weight:bold;", "color:#e67e22; font-weight:bold;");
+
+  // ⏱️ 45s Timeout for large batches or slow DB
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+     console.warn(`⏳ [TIMEOUT] Batch ${batchNum} took > 45s! Aborting...`);
+     controller.abort();
+  }, 45000);
 
   fetch('https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: encodedChunk
+    body: encodedChunk,
+    signal: controller.signal
   })
-  .then(response => response.json())
-  .then(result => {
+  .then(response => {
+    console.log(`---------------------------------------------------------`);
+    console.log(`%c📥 [APPSCRIPT -> BG] %cReceived HTTP ${response.status}`, "color:#ff9800; font-weight:bold;", "color:#e67e22; font-weight:bold;");
+    return response.text();
+  })
+  .then(text => {
+    clearTimeout(timeoutId);
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch (e) {
+      uploadState.isLoopRunning = false;
+      console.log(`---------------------------------------------------------`);
+      console.error(`%c❌ [ERROR] %cInvalid response: %c${text.substring(0, 100)}`, "color:red; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:red;");
+      handleUploadError('Invalid Server Response');
+      console.groupEnd();
+      return;
+    }
+
     if (result.status === 'success') {
       const timeTaken = Date.now() - startTime;
-      
-      // Update the running average for chunk time
-      if (!uploadState.avgChunkTime) {
-         uploadState.avgChunkTime = timeTaken + 1000; // adding the delay as well
-      } else {
-         uploadState.avgChunkTime = (uploadState.avgChunkTime * 0.7) + ((timeTaken + 1000) * 0.3);
-      }
-
-      uploadState.uploaded += chunk.length;
-      uploadState.currentIndex += uploadState.chunkSize;
-      
-      const remainingLeads = uploadState.total - uploadState.uploaded;
+      const totalUploadedNow = uploadState.uploaded + chunk.length;
+      const percent = Math.min(Math.round((totalUploadedNow / uploadState.total) * 100), 100);
+      const remainingLeads = uploadState.total - totalUploadedNow;
       const remainingChunks = Math.ceil(remainingLeads / uploadState.chunkSize);
-      const estSecondsLeft = Math.ceil((remainingChunks * uploadState.avgChunkTime) / 1000);
 
-      const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
+      console.log(`---------------------------------------------------------`);
+      console.log(`%c✅ [SUCCESS] %cBatch finished in %c${(timeTaken/1000).toFixed(1)}s`, "color:#f1c40f; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#f1c40f; font-weight:bold;");
+      console.log(`%c📊 [PROGRESS] %c${percent}% Completed. ${remainingLeads} leads remaining.`, "color:#0065b3; font-weight:bold;", "color:#e67e22; font-weight:bold;");
+      console.log(`---------------------------------------------------------`);
+      console.groupEnd();
+
+      uploadState.uploaded = totalUploadedNow;
+      uploadState.currentIndex += uploadState.chunkSize;
+
+      // 🕒 Update Average Batch Time (Weighted Moving Average)
+      // We add 1.5s for scheduling overhead
+      const currentBatchFullTime = timeTaken + 1500; 
+      if (!uploadState.avgChunkTime) {
+          uploadState.avgChunkTime = currentBatchFullTime;
+      } else {
+          uploadState.avgChunkTime = (uploadState.avgChunkTime * 0.7) + (currentBatchFullTime * 0.3);
+      }
       
-      console.log(`🔄 Uploading... ${uploadState.uploaded}/${uploadState.total} rows (${percent}%) | Time: ${estSecondsLeft}s left`);
+      const estSecondsLeft = Math.ceil((remainingChunks * uploadState.avgChunkTime) / 1000);
+      
+      // 📈 Append to history for the graph
+      if (!uploadState.chunkHistory) uploadState.chunkHistory = [];
+      uploadState.chunkHistory.push(Number((timeTaken / 1000).toFixed(2)));
 
       sendUpdateToContent('UPLOAD_PROGRESS', {
         progressPercent: percent,
         uploadedCount: uploadState.uploaded,
         totalCount: uploadState.total,
         estSecondsLeft: estSecondsLeft,
-        currentLead: chunk[0] // 🏠 Send current lead data for live display
+        chunkSize: uploadState.chunkSize, 
+        avgChunkTime: uploadState.avgChunkTime,
+        lastBatchTime: timeTaken, 
+        chunkHistory: uploadState.chunkHistory, 
+        currentLead: chunk[0]
       });
 
       syncStateToStorage();
-      // Avoid blocking, schedule next chunk
+      uploadState.isLoopRunning = false;
       setTimeout(startUploadLoop, 1000);
     } else {
-      console.error('❌ Server Error:', result.message);
-      handleUploadError('Server Error: ' + result.message);
+      uploadState.isLoopRunning = false;
+      console.error('❌ [DB ERROR] Server Business Logic Error:', result);
+      handleUploadError('Server Error: ' + (result.message || JSON.stringify(result)));
     }
   })
   .catch(err => {
-    console.error('❌ Network Error:', err);
-    handleUploadError('Network Error: ' + err.message);
+    clearTimeout(timeoutId);
+    uploadState.isLoopRunning = false;
+    const msg = err.name === 'AbortError' ? 'Request Timeout (30s)' : 'Network Error';
+    console.error(`❌ ${msg}:`, err);
+    handleUploadError(msg + ': ' + err.message);
   });
 }
 
 function handleUploadError(errMsg) {
+  console.warn(`🛑 [UPLOAD TERMINATED] Reason: ${errMsg} | State: Paused at index ${uploadState.currentIndex}`);
   uploadState.isPaused = true;
   uploadState.isError = true;
   uploadState.errorMessage = errMsg;
@@ -162,6 +236,7 @@ function handleUploadError(errMsg) {
 let sourceTabId = null;
 
 function sendUpdateToContent(type, payload) {
+  console.log(`%c📤 [BG -> POPUP] %cSending: %c${type}`, "color:#2196f3; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#2196f3; font-weight:bold;");
   if (sourceTabId) {
     // Send reliably to the exact tab that started the process, even if it's in the background
     chrome.tabs.sendMessage(sourceTabId, { type, payload });
@@ -176,22 +251,45 @@ function sendUpdateToContent(type, payload) {
 // Listener to start the process
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'TABLE_DATA') {
-    console.log('Received table data in background.js');
+    const rowCount = message.payload ? message.payload.length : 0;
+    const tabName = (sender && sender.tab) ? sender.tab.title : 'Unknown Tab';
+    
+    console.groupCollapsed(`%c📥 [NEW PAYLOAD] %cReceived %c${rowCount} leads %cfrom: %c${tabName}`, "color:#f1c40f; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#f1c40f; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#0065b3; font-weight:bold;");
+    
     if (sender && sender.tab) {
       sourceTabId = sender.tab.id; // Remember which tab is showing the UI
     }
     tableDataToUpload = message.payload;
+    
+    // 🚀 Smart Start: Skip leads that were already marked as uploaded in the payload
+    const firstPending = tableDataToUpload.findIndex(l => !l.isUploaded);
+    const uploadedInPayload = tableDataToUpload.filter(l => l.isUploaded).length;
+
+    console.log(`🔍 [ANALYSIS] Found %c${uploadedInPayload} already uploaded.`, "color:#ff9800; font-weight:bold;");
+    console.log(`📍 [POINTER] Resuming from first pending at: %cIndex ${firstPending}`, "color:#9c27b0; font-weight:bold;");
+    console.groupEnd();
+
     uploadState = {
       total: tableDataToUpload.length,
-      uploaded: 0,
-      currentIndex: 0,
-      chunkSize: 10, // 🚀 1 by 1 for precise tracking and pausing
+      uploaded: uploadedInPayload,
+      currentIndex: firstPending === -1 ? tableDataToUpload.length : firstPending,
+      chunkSize: 10,
       isPaused: false,
       isError: false,
-      errorMessage: ''
+      errorMessage: '',
+      sessionStartTime: Date.now() // 🕒 Track session start for summary
     };
     syncStateToStorage();
-    startUploadLoop();
+    if (uploadState.currentIndex < uploadState.total) {
+        startUploadLoop();
+    } else {
+        console.log('All leads in payload already uploaded.');
+        sendUpdateToContent('UPLOAD_COMPLETE', { 
+            total: uploadState.total, 
+            uploaded: uploadState.uploaded, 
+            preChecked: true 
+        });
+    }
   }
   else if (message.type === 'PAUSE_UPLOAD') {
     uploadState.isPaused = true;
@@ -216,5 +314,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     uploadState.currentIndex = 0;
     syncStateToStorage();
     startUploadLoop();
+  }
+  else if (message.type === 'PING') {
+    const pulseCount = (uploadState.pulseCount || 0) + 1;
+    uploadState.pulseCount = pulseCount;
+    if (pulseCount % 30 === 0) console.log(`%c💓 [HEARTBEAT] %cService Worker is Active.`, "color:#f1c40f; font-weight:bold;", "color:#f1c40f;");
+    sendResponse({ type: 'PONG' });
   }
 });
