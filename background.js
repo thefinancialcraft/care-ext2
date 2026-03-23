@@ -1,45 +1,38 @@
-function handlePopupInjection() {
-  chrome.tabs.query({}, (tabs) => {
-    const targetTab = tabs.find(t => t.url === 'https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard');
-
-    if (targetTab) {
-      chrome.scripting.executeScript({
-        target: { tabId: targetTab.id },
-        files: ['showPopup.js'],
-      });
-      console.log('✅ Script executed on the target tab!');
-    } else {
-      chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
-        if (activeTabs[0]) {
-          chrome.scripting.executeScript({
-            target: { tabId: activeTabs[0].id },
-            files: ['showCustomPopup.js'],
-          });
-        }
-      });
-    }
-  });
+function handlePopupInjection(tabId, url) {
+  if (!url) return;
+  
+  // 📊 DASHBOARD: Show Progress/Extraction Popup
+  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard')) {
+    chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['showPopup.js'],
+    });
+    console.log('✅ Dashboard UI Injected into tab:', tabId);
+  } 
+  // 🔑 LOGIN: Show Agent Selector Popup
+  else if (url.includes('#auth/login') || (url.includes('faveo') && url.includes('/login'))) {
+    chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['favLogin.js'],
+    });
+    console.log('✅ Login UI Injected into tab:', tabId);
+  }
 }
 
 // 🔘 Triggered when extension icon is clicked
-chrome.action.onClicked.addListener(() => {
-  handlePopupInjection();
+chrome.action.onClicked.addListener((tab) => {
+  handlePopupInjection(tab.id, tab.url);
 });
 
 // 🔁 Triggered when a URL loads completely
 chrome.webNavigation.onCompleted.addListener((details) => {
-  if (details.url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard')) {
-    handlePopupInjection();
-  }
-}, {
-  url: [{ urlMatches: 'https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard' }]
+  handlePopupInjection(details.tabId, details.url);
 });
 
 // 🌀 Triggered when tab URL is updated (hash change etc.)
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url &&
-      tab.url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard')) {
-    handlePopupInjection();
+  if (changeInfo.status === 'complete' && tab.url) {
+    handlePopupInjection(tabId, tab.url);
   }
 });
 
@@ -320,5 +313,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     uploadState.pulseCount = pulseCount;
     if (pulseCount % 30 === 0) console.log(`%c💓 [HEARTBEAT] %cService Worker is Active.`, "color:#f1c40f; font-weight:bold;", "color:#f1c40f;");
     sendResponse({ type: 'PONG' });
+  } 
+  else if (message.type === 'FETCH_AGENTS') {
+    // 🚀 UNIFIED URL with 'forlogin' action
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=forlogin';
+    
+    fetch(APPS_SCRIPT_URL)
+      .then(res => res.json())
+      .then(agents => sendResponse({ success: true, agents }))
+      .catch(err => {
+        console.error('❌ Failed to fetch agents:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true; // Keep channel open
   }
 });
+

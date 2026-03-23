@@ -12,7 +12,8 @@
     }
     window.careExtInitialized = true;
     let extensionGlobalActive = true;
-    let isAutoSyncRunning = false;   // 🚀 Auto-pilot state
+    let isAutoSyncRunning = false;
+    let isUploadPaused = false; // 🚀 New flag for error/pause states   // 🚀 Auto-pilot state
     let isBackgroundActive = true;   // 🚀 Tracking the service worker heartbeat
     let lastKnownPulse = Date.now(); // 🚀 Last known heartbeat time
     let isGamePlaying = false;       // 🚀 Tic-Tac-Toe state
@@ -227,9 +228,29 @@
     };
 
     let isSuperCompactMode = true; // 🚀 EXTRA-COMPACT by default now!
+    console.log("%c[UI] %cSuper-Compact Mode Initialized: %c" + isSuperCompactMode, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#FFB74D; font-weight:bold;");
 
     const createMinimizedBar = () => {
-        const bar = document.createElement('div');
+        let bar = document.getElementById('compactStatusBar');
+        if (bar) {
+            console.log("%c[UI] %cChecking/Repairing existing compactStatusBar...", "color:#4FC3F7; font-weight:bold;", "color:#BDBDBD; font-style:italic;");
+            
+            // 🚀 Ensure missing buttons are added if bar is reused
+            const missingIds = ['miniResumeBtn', 'miniPauseBtn', 'miniNameText', 'miniNameHandle'];
+            let needsRepair = false;
+            missingIds.forEach(id => { if (!document.getElementById(id)) needsRepair = true; });
+
+            if (needsRepair) {
+                console.log("%c[UI] %cBar is outdated, repairing...", "color:#4FC3F7; font-weight:bold;", "color:#FFB74D;");
+                bar.remove();
+                bar = null;
+            } else {
+                return bar;
+            }
+        }
+
+        console.log("%c[UI] %cCreating new compactStatusBar...", "color:#4FC3F7; font-weight:bold;", "color:#FFB74D; font-weight:bold;");
+        bar = document.createElement('div');
         bar.id = 'compactStatusBar';
         Object.assign(bar.style, {
             position: 'fixed', top: '10px', right: '15px', 
@@ -245,7 +266,7 @@
             height: '44px', 
             cursor: 'pointer', overflow: 'hidden',
             backdropFilter: 'blur(8px)',
-            transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), background 0.4s, opacity 0.4s',
             transformOrigin: 'right center' // 🚀 Crucial for Right-to-Left expansion
         });
 
@@ -272,7 +293,8 @@
         toggleBtn.onclick = (e) => {
             e.stopPropagation();
             isSuperCompactMode = !isSuperCompactMode;
-            updateMinimizedStatus(); // 🚀 Centralized source of truth
+            console.log("%c[UI] %cSuper-Compact Toggle Clicked: %c" + isSuperCompactMode, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#FFB74D; font-weight:bold;");
+            updateMinimizedStatus(true); // 🚀 Force refresh on manual toggle
         };
 
         const nameHandle = document.createElement('div');
@@ -280,17 +302,25 @@
         Object.assign(nameHandle.style, {
             display: 'flex', // 🚀 Default Visible
             alignItems: 'center', gap: '6px', 
-            cursor: 'move', minWidth: '100px'
+            cursor: 'move', minWidth: '80px'
         });
+        
+        const nameText = document.createElement('span');
+        nameText.id = 'miniNameText';
+        Object.assign(nameText.style, {
+            color: '#fff', fontSize: '12px', fontWeight: 'bold', letterSpacing: '0.3px'
+        });
+        nameHandle.appendChild(nameText);
 
-        // 🟢 Bridge Indicator in Mini Bar
-        const miniDot = document.createElement('div');
+        const miniDot = document.getElementById('miniPulseDot') || document.createElement('div');
         miniDot.id = 'miniPulseDot';
-        Object.assign(miniDot.style, {
-            width: '6px', height: '6px', borderRadius: '50%', 
-            background: '#4caf50', transition: 'all 0.3s ease'
-        });
-        nameHandle.appendChild(miniDot);
+        if (!miniDot.parentElement) {
+            Object.assign(miniDot.style, {
+                width: '6px', height: '6px', borderRadius: '50%', 
+                background: '#4caf50', transition: 'all 0.3s ease'
+            });
+            nameHandle.appendChild(miniDot);
+        }
 
         const statsArea = document.createElement('div');
         statsArea.id = 'miniStatsArea';
@@ -338,6 +368,25 @@
             toggleMinimize();
         };
 
+        const resumeBtn = document.createElement('button');
+        resumeBtn.id = 'miniResumeBtn';
+        resumeBtn.innerHTML = '<i class="fi flex fi-rr-play"></i>'; // 🚀 RR is safer in Faveo
+        Object.assign(resumeBtn.style, {
+            display: 'none', // 🚀 Hidden by default
+            background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff',
+            fontSize: '14px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
+            width: '30px', height: '30px', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.2s', boxShadow: '0 0 10px rgba(0,0,0,0.2)'
+        });
+        resumeBtn.title = 'Resume Upload';
+        resumeBtn.onclick = (e) => {
+            e.stopPropagation();
+            console.log("%c[UI] %cResume Button Clicked in Mini Bar", "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;");
+            isUploadPaused = false; 
+            updateMinimizedStatus(true);
+            resumeBackgroundProcess(); // 🚀 Trigger existing resume logic
+        };
+
         const closeBtn = document.createElement('button');
         closeBtn.id = 'miniCloseBtn';
         closeBtn.innerHTML = '<i class="fi flex fi-br-cross"></i>';
@@ -362,7 +411,9 @@
             closeBtn.style.color = 'rgba(255,255,255,0.5)'; 
         };
 
-        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, expandBtn, closeBtn, miniProgress);
+
+
+        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, resumeBtn, expandBtn, closeBtn, miniProgress);
         document.body.appendChild(bar);
 
         // 🚀 Enable Dragging ONLY for the Name Handle
@@ -371,25 +422,39 @@
         return bar;
     };
 
-    const toggleMinimize = (forceExpand = false) => {
-        const popup = document.getElementById('my-dashboard-popup');
-        const compactBar = document.getElementById('compactStatusBar') || createMinimizedBar();
-        
-        const isCurrentlyCompact = compactBar.style.display === 'flex';
-
-        if (isCurrentlyCompact || forceExpand) {
-            // EXPAND
-            compactBar.style.display = 'none';
-            if (popup) popup.style.display = 'flex';
-        } else {
-            // MINIMIZE
-            if (popup) popup.style.display = 'none';
-            compactBar.style.display = 'flex';
-            updateMinimizedStatus();
+    // 🚀 Helper to set style only if it changed (Prevents transition flickering)
+    const setSafeStyle = (el, prop, val) => {
+        if (el && el.style[prop] !== val) {
+            el.style[prop] = val;
         }
     };
 
-    const updateMinimizedStatus = () => {
+    const setMinimizedView = (shouldBeMinimized = true) => {
+        const popup = document.getElementById('my-dashboard-popup');
+        const compactBar = document.getElementById('compactStatusBar') || createMinimizedBar();
+        
+        console.log("%c[UI] %csetMinimizedView called: %c" + (shouldBeMinimized ? "MINIMIZE" : "EXPAND"), "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#FFB74D; font-weight:bold;");
+        
+        if (shouldBeMinimized) {
+            // MINIMIZE
+            if (popup) popup.style.display = 'none';
+            compactBar.style.display = 'flex';
+            updateMinimizedStatus(true);
+        } else {
+            // EXPAND
+            compactBar.style.display = 'none';
+            if (popup) popup.style.display = 'flex';
+        }
+    };
+
+    const toggleMinimize = () => {
+        const compactBar = document.getElementById('compactStatusBar');
+        const isCurrentlyCompact = compactBar && compactBar.style.display === 'flex';
+        setMinimizedView(!isCurrentlyCompact);
+    };
+
+    let lastIconType = null;
+    const updateMinimizedStatus = (isInitial = false) => {
         const compactBar = document.getElementById('compactStatusBar');
         const nameHandle = document.getElementById('miniNameHandle');
         const statsArea = document.getElementById('miniStatsArea');
@@ -397,6 +462,7 @@
         const expandBtn = document.getElementById('miniExpandBtn');
         const closeBtn = document.getElementById('miniCloseBtn');
         const toggleBtn = document.getElementById('superCompactToggle');
+        const resumeBtn = document.getElementById('miniResumeBtn');
 
         if (!nameHandle || !statsArea || !compactBar || compactBar.style.display === 'none') return;
         
@@ -418,56 +484,84 @@
 
         // 🚀 Update progress line
         const miniProgress = document.getElementById('miniProgressLine');
-        if (miniProgress) miniProgress.style.width = percent;
+        if (miniProgress) {
+            miniProgress.style.width = percent;
+            setSafeStyle(miniProgress, 'background', isUploadPaused ? '#ff5252' : '#f1c40f');
+        }
+
+        // 🚀 BG Gradient Sync
+        const normalBg = 'linear-gradient(135deg, #1e3a5f 0%, #0065b3 100%)';
+        const errorBg = 'linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)'; 
+        const criticalBg = 'linear-gradient(135deg, #424242 0%, #212121 100%)'; // 🌑 Deep Dark for Disconnected
+        
+        let targetBg = isUploadPaused ? errorBg : normalBg;
+        if (!isBackgroundActive) targetBg = criticalBg; 
+        
+        setSafeStyle(compactBar, 'background', targetBg);
 
         // 🚀 Centralized Visibility Logic
         if (isSuperCompactMode) {
             // ⬛ SUPER-COMPACT PILL (Stable width)
-            compactBar.style.minWidth = isAutoSyncRunning ? '140px' : '180px';
-            compactBar.style.width = 'auto';
-            compactBar.style.padding = '8px 18px';
-            compactBar.style.gap = '10px';
-            if (toggleBtn) toggleBtn.innerHTML = '<i class="fi flex fi-tr-angle-small-right"></i>';
-
-            if (isAutoSyncRunning) {
-                nameHandle.style.display = 'none';
-                miniBtn.style.display = 'none';
-                statsArea.style.display = 'flex';
-            } else {
-                nameHandle.style.display = 'flex';
-                miniBtn.style.display = 'flex';
-                statsArea.style.display = 'none';
+            setSafeStyle(compactBar, 'minWidth', isAutoSyncRunning ? '140px' : '180px');
+            setSafeStyle(compactBar, 'padding', '8px 18px');
+            setSafeStyle(compactBar, 'gap', '10px');
+            
+            const iconHtml = '<i class="fi flex fi-tr-angle-small-right"></i>';
+            if (toggleBtn && lastIconType !== 'right') {
+                toggleBtn.innerHTML = iconHtml;
+                lastIconType = 'right';
             }
-            if (expandBtn) expandBtn.style.display = 'none';
-            if (closeBtn) closeBtn.style.display = 'none';
+
+            if (isAutoSyncRunning || isUploadPaused) {
+                // 🚀 Syncing or Paused
+                setSafeStyle(nameHandle, 'display', 'none');
+                setSafeStyle(miniBtn, 'display', 'none');
+                setSafeStyle(statsArea, 'display', 'flex'); // 🚀 Always keep stats visible now
+                setSafeStyle(resumeBtn, 'display', isUploadPaused ? 'flex' : 'none');
+            } else {
+                // 🚀 Idle
+                setSafeStyle(nameHandle, 'display', 'flex');
+                setSafeStyle(miniBtn, 'display', 'flex');
+                setSafeStyle(statsArea, 'display', 'none');
+                setSafeStyle(resumeBtn, 'display', 'none');
+            }
+            if (expandBtn) setSafeStyle(expandBtn, 'display', 'none');
+            if (closeBtn) setSafeStyle(closeBtn, 'display', 'none');
         } else {
             // ⬜ COMPACT BAR (Expanded Arrow)
-            compactBar.style.minWidth = '320px';
-            compactBar.style.padding = '8px 16px';
-            compactBar.style.gap = '15px';
-            if (toggleBtn) toggleBtn.innerHTML = '<i class="fi flex fi-tr-angle-small-left"></i>';
-
-            nameHandle.style.display = 'flex'; 
-            statsArea.style.display = 'flex'; 
+            setSafeStyle(compactBar, 'minWidth', '320px');
+            setSafeStyle(compactBar, 'padding', '8px 16px');
+            setSafeStyle(compactBar, 'gap', '15px');
             
-            if (isAutoSyncRunning) {
-                miniBtn.style.display = 'none'; 
-            } else {
-                miniBtn.style.display = 'flex'; 
+            const iconHtml = '<i class="fi flex fi-tr-angle-small-left"></i>';
+            if (toggleBtn && lastIconType !== 'left') {
+                toggleBtn.innerHTML = iconHtml;
+                lastIconType = 'left';
             }
-            if (expandBtn) expandBtn.style.display = 'flex';
-            if (closeBtn) closeBtn.style.display = 'flex';
+
+            setSafeStyle(nameHandle, 'display', 'flex'); 
+            setSafeStyle(statsArea, 'display', 'flex'); 
+            setSafeStyle(resumeBtn, 'display', isUploadPaused ? 'flex' : 'none'); 
+            
+            if (isAutoSyncRunning || isUploadPaused) {
+                setSafeStyle(miniBtn, 'display', 'none'); 
+            } else {
+                setSafeStyle(miniBtn, 'display', 'flex'); 
+            }
+            if (expandBtn) setSafeStyle(expandBtn, 'display', 'flex');
+            if (closeBtn) setSafeStyle(closeBtn, 'display', 'flex');
         }
 
-        // 🚀 Always ensure content is up-to-date
-        nameHandle.innerHTML = `
-            <i class="fi flex fi-rr-user" style="color:#e3f2fd; font-size:14px; display:flex; align-items:center; justify-content:center;"></i>
-            <span style="color:#fff; font-size:12px; font-weight:bold; letter-spacing:0.3px;">${agentName}</span>
-        `;
+        // 🚀 Always ensure content is up-to-date (Without wiping the Pulse Dot)
+        const nameText = document.getElementById('miniNameText');
+        if (nameText && nameText.innerText !== agentName) {
+            console.log("%c[UI] %cUpdating Agent Name: %c" + agentName, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#81C784; font-weight:bold;");
+            nameText.innerText = agentName;
+        }
 
 
         if (isAutoSyncRunning || (!isSuperCompactMode && percent !== '100%')) {
-            statsArea.innerHTML = `
+            const newStatsHtml = `
                 <div style="display:flex; align-items:center; gap:6px; color:#fff; font-size:12px; font-weight:bold;">
                     <span>${total}</span>
                 </div>
@@ -482,14 +576,21 @@
                     <span>${uploaded}</span>
                 </div>
             `;
+            if (statsArea.innerHTML !== newStatsHtml) {
+                console.log("%c[UI] %cUpdating statsArea content (Sync/Timer Change)", "color:#4FC3F7; font-weight:bold;", "color:#BDBDBD; font-style:italic;");
+                statsArea.innerHTML = newStatsHtml;
+            }
         } else if (!isSuperCompactMode && percent === '100%') {
-            statsArea.innerHTML = `
+            const successHtml = `
                 <div style="height:14px; width:1px; background:rgba(255,255,255,0.3);"></div>
                 <div style="display:flex; align-items:center; gap:6px; color:#c8e6c9; font-size:12px; font-weight:bold;">
                     <i class="fi flex fi-rr-check-circle" style="font-size:14px; display:flex; align-items:center; justify-content:center;"></i>
                     <span>Success</span>
                 </div>
             `;
+            if (statsArea.innerHTML !== successHtml) {
+                statsArea.innerHTML = successHtml;
+            }
         }
     };
 
@@ -2584,6 +2685,8 @@ const handleCustomMonthClick = () => {
       // 📦 Verify context validity before sending
       if (!chrome.runtime?.id) {
          console.warn('-- Extension Context Invalidated. Refresh needed. --');
+         isBackgroundActive = false;
+         updateMinimizedStatus(); // 🌑 Bar turns dark
          if (messageDiv) {
             messageDiv.innerHTML = `<div style="color:#d32f2f; padding:20px; font-weight:bold;">⚠️ Connection Lost.<br>This usually happens when the extension is updated.<br>Please Refresh the page to synchronize.</div>`;
          } else {
@@ -2712,6 +2815,7 @@ const handleCustomMonthClick = () => {
 
                     if (!isBackgroundActive && isAutoSyncRunning) {
                         console.warn('❌ [CRITICAL] Background Heartbeat Lost during active process!');
+                        isUploadPaused = true; // 🚨 Set paused state visually
                         showBackgroundKilledUI();
                     }
                 }
@@ -2751,8 +2855,10 @@ const handleCustomMonthClick = () => {
 
     function handleUploadErrorUI(payload) {
       isAutoSyncRunning = false; // 🚀 Reset UI state on error
+      isUploadPaused = true; // 🚨 New state
       if (countdownInterval) clearInterval(countdownInterval);
       removeExtractionOverlay(); // 🚀 Force remove game overlay on error
+      updateMinimizedStatus(); // 🔄 Sync changes to bar immediately 
       const summaryDiv = document.getElementById('uploadSummaryDiv');
       const pauseBtn = document.getElementById('pauseUploadBtn');
       const resumeBtn = document.getElementById('resumeUploadBtn');
@@ -3557,11 +3663,12 @@ const handleCustomMonthClick = () => {
       // 🚀 Initial Cleanup
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
-      if (window.location.href === 'https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard') {
+      if (window.location.href.includes('/portal/dashboard')) {
         if (!document.getElementById('my-dashboard-popup')) {
+          console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
           const { popup, nameSpan, spinner, buttonContainer } = createPopup();
           addSpinnerStyle();
-          toggleMinimize(); // 🚀 Default to Minimized view on startup
+          setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
           
           setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
         }
