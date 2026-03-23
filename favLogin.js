@@ -42,9 +42,13 @@
                 #agentListContainer::-webkit-scrollbar { display: none !important; }\
                 @keyframes favSlideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }\
                 .agent-card { width: 100%; padding: 12px 15px; border: none; border-radius: 12px; background: rgba(255, 255, 255, 0.05); color: #fff; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.05); position: relative; }\
-                .agent-card:hover { background: rgba(255, 255, 255, 0.1); transform: translateX(5px); border-color: #0065b3; }\
+                .agent-card:hover { background: rgba(255, 255, 255, 0.1); border-color: #0065b3; box-shadow: 0 0 0 2px rgba(0, 101, 179, 0.5); }\
                 .agent-icon-box { width: 32px; height: 32px; background: #0065b3; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }\
-                .key-badge { margin-left: auto; font-size: 9px; background: rgba(255,255,255,0.1); padding: 2px 5px; border-radius: 4px; color: rgba(255,255,255,0.5); }\
+                .key-badge { margin-left: auto; font-size: 11px; font-weight: 700; background: rgba(255,255,255,0.15); padding: 3px 8px; border-radius: 6px; color: rgba(255,255,255,0.9); border: 1px solid rgba(255,255,255,0.1); display: flex !important; align-items: center; justify-content: center; min-width: 26px; height: 24px; transition: all 0.2s; }\
+                .key-badge i { display: none !important; font-size: 10px; }\
+                .key-badge:hover { background: #0065b3; color: #fff; border-color: transparent; }\
+                .key-badge:hover span { display: none !important; }\
+                .key-badge:hover i { display: flex !important; }\
                 .fav-login-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: move; user-select: none; }\
                 .fav-login-title { font-size: 15px; font-weight: 600; color: #fff; margin: 0; }\
                 .dancing-dots { display: flex; gap: 4px; margin-top: 15px; justify-content: center; }\
@@ -90,10 +94,152 @@
                 var aName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Unknown';
                 var aId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '--';
                 var card = document.createElement('button'); card.className = 'agent-card';
-                card.innerHTML = '<div class="agent-icon-box"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>' + (index < 9 ? '<div class="key-badge">' + (index+1) + '</div>' : '');
-                card.onclick = function() { startLoginCycle(agent, aName, aId, list); };
+                card.innerHTML = '<div class="agent-icon-box"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>' + (index < 9 ? '<div class="key-badge"><span>' + (index+1) + '</span><i class="fi fi-rr-edit"></i></div>' : '');
+                
+                card.onclick = function(e) { 
+                    // 🚀 If badge was clicked, handle it separately
+                    if (e.target.closest('.key-badge')) {
+                        e.stopPropagation();
+                        openEditWorkflow(agent, aName, aId, list, agents);
+                        return;
+                    }
+                    startLoginCycle(agent, aName, aId, list); 
+                };
                 list.appendChild(card);
             });
+        };
+
+        var openEditWorkflow = function(agent, aName, aId, list, originalAgents) {
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#0065b3'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#0065b3;"><i class="fi flex fi-rr-settings"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">Password Management</div></div>';
+            list.appendChild(header);
+
+            var btnContainer = document.createElement('div');
+            btnContainer.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:15px;';
+
+            var createBtn = document.createElement('button');
+            createBtn.className = 'agent-card'; createBtn.style.background = 'rgba(76, 175, 80, 0.1)';
+            createBtn.innerHTML = '<div class="agent-icon-box" style="background:#4caf50; width:24px; height:24px; font-size:10px;"><i class="fi flex fi-rr-plus"></i></div><div style="font-size:12px; font-weight:600;">Create Password</div>';
+            createBtn.onclick = function() { 
+                console.log('🚀 Redirecting to Reset Password for:', aId);
+                
+                // 🎨 Show loader during redirect
+                list.innerHTML = '';
+                
+                // 🚀 RE-ADD ACTIVE AGENT CARD (Matched Login State)
+                var activeCard = document.createElement('div');
+                activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
+                activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>';
+                list.appendChild(activeCard);
+
+                var statusMsg = document.createElement('div');
+                statusMsg.style.cssText = 'color:rgba(255,255,255,0.6); font-size:12px; text-align:center; margin-top:20px;';
+                statusMsg.innerText = 'Please wait...';
+                list.appendChild(statusMsg);
+
+                var loader = document.createElement('div'); loader.className = 'dancing-dots';
+                loader.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                list.appendChild(loader);
+
+                chrome.storage.local.set({ 
+                    favPendingResetId: aId, 
+                    favPendingResetAgent: agent, // 🧪 Store full agent for OTP finder
+                    favPendingResetName: aName 
+                }, function() {
+                    setTimeout(function() {
+                        window.location.hash = '#/auth/resetpwd';
+                    }, 800);
+                });
+            };
+
+            var updateBtn = document.createElement('button');
+            updateBtn.className = 'agent-card'; updateBtn.style.background = 'rgba(0, 101, 179, 0.1)';
+            updateBtn.innerHTML = '<div class="agent-icon-box" style="background:#0065b3; width:24px; height:24px; font-size:10px;"><i class="fi flex fi-rr-refresh"></i></div><div style="font-size:12px; font-weight:600;">Update Password</div>';
+            updateBtn.onclick = function() { openPasswordUpdate(agent, aName, aId, list, originalAgents); };
+
+            var backBtn = document.createElement('button');
+            backBtn.className = 'agent-card'; backBtn.style.marginTop = '10px'; backBtn.style.opacity = '0.6';
+            backBtn.innerHTML = '<i class="fi flex fi-rr-arrow-small-left"></i> <div style="font-size:11px;">Back to profiles</div>';
+            backBtn.onclick = function() { renderAgents(originalAgents); };
+
+            btnContainer.appendChild(createBtn);
+            btnContainer.appendChild(updateBtn);
+            btnContainer.appendChild(backBtn);
+            list.appendChild(btnContainer);
+        };
+
+        var openPasswordUpdate = function(agent, aName, aId, list, originalAgents) {
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#0065b3'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#0065b3;"><i class="fi flex fi-rr-refresh"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">Update Secret Password</div></div>';
+            list.appendChild(header);
+
+            var formContainer = document.createElement('div');
+            formContainer.style.cssText = 'display:flex; flex-direction:column; gap:12px; margin-top:20px;';
+
+            var passInput = document.createElement('input');
+            passInput.type = 'text';
+            passInput.placeholder = 'Type password...';
+            passInput.value = getKey(agent, 'agent password') || getKey(agent, 'agent_password') || '';
+            Object.assign(passInput.style, {
+                width: '100%', padding: '12px 15px', borderRadius: '12px',
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#fff', fontSize: '13px', outline: 'none', transition: 'border-color 0.3s'
+            });
+            passInput.onfocus = function() { this.style.borderColor = '#0065b3'; this.style.background = 'rgba(255,255,255,0.1)'; };
+            passInput.onblur = function() { this.style.borderColor = 'rgba(255,255,255,0.1)'; this.style.background = 'rgba(255,255,255,0.06)'; };
+
+            var saveBtn = document.createElement('button');
+            saveBtn.className = 'agent-card'; saveBtn.style.background = '#0065b3'; saveBtn.style.justifyContent = 'center'; saveBtn.style.borderColor = 'transparent';
+            saveBtn.innerHTML = '<div style="font-size:13px; font-weight:700; letter-spacing:1px;">SAVE PASSWORD</div>';
+            saveBtn.onclick = function() {
+                var newPass = passInput.value.trim();
+                if (!newPass) return;
+                
+                saveBtn.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="margin-right:8px; animation:rotate 1s linear infinite;"></i> SAVING...';
+                
+                // 📡 Send update to background script
+                chrome.runtime.sendMessage({ 
+                    type: 'UPDATE_PASSWORD', 
+                    payload: { userId: aId, newPassword: newPass } 
+                }, function(response) {
+                    if (response && response.success) {
+                        saveBtn.innerHTML = '<i class="fi flex fi-rr-check" style="margin-right:8px;"></i> SAVED';
+                        saveBtn.style.background = '#4caf50';
+                        console.log('✅ Successfully synced with Sheet for:', aId);
+                        
+                        // 🚀 RE-FETCH ALL PROFILES AFTER SAVE
+                        setTimeout(function() {
+                            list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Refreshing data...</div>';
+                            chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(refreshRes) {
+                                if (refreshRes && refreshRes.success) {
+                                    renderAgents(refreshRes.agents);
+                                } else {
+                                    renderAgents(originalAgents); // Fallback to local if fetch fails
+                                }
+                            });
+                        }, 1200);
+                    } else {
+                        saveBtn.innerHTML = '<i class="fi flex fi-rr-cross" style="margin-right:8px;"></i> FAILED';
+                        saveBtn.style.background = '#f44336';
+                        setTimeout(function() { saveBtn.innerHTML = 'RETRY SAVE'; saveBtn.style.background = '#0065b3'; }, 2000);
+                    }
+                });
+            };
+
+            var backBtn = document.createElement('button');
+            backBtn.className = 'agent-card'; backBtn.style.marginTop = '10px'; backBtn.style.opacity = '0.5'; backBtn.style.background = 'transparent';
+            backBtn.innerHTML = '<i class="fi flex fi-rr-arrow-small-left"></i> <div style="font-size:11px;">Cancel</div>';
+            backBtn.onclick = function() { openEditWorkflow(agent, aName, aId, list, originalAgents); };
+
+            formContainer.appendChild(passInput);
+            formContainer.appendChild(saveBtn);
+            formContainer.appendChild(backBtn);
+            list.appendChild(formContainer);
+            passInput.focus();
         };
 
         var startLoginCycle = function(agent, aName, aId, list) {
@@ -294,7 +440,10 @@
                     }
                 }
 
-                var otpInput = document.getElementById('passwordOtp');
+                // 🎯 [Universal Selector] Try both Login and Reset Password fields
+                var otpInput = document.getElementById('passwordOtp') || document.querySelector('input[formcontrolname="otp"]');
+                var submitBtn = document.getElementById('sign_in_btn') || document.getElementById('verfy_otp_btn');
+
                 if (otpInput) {
                     otpInput.value = fullOtp;
                     otpInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -302,10 +451,9 @@
                     otpInput.dispatchEvent(new Event('blur', { bubbles: true }));
                     
                     setTimeout(function() { 
-                        var b = document.getElementById('sign_in_btn'); 
-                        if (b) { 
-                            console.log('🏁 Submitting OTP...');
-                            b.disabled = false; b.click(); 
+                        if (submitBtn) { 
+                            console.log('🏁 Submitting OTP to:', submitBtn.id);
+                            submitBtn.disabled = false; submitBtn.click(); 
                         } 
                     }, 800);
                 }
@@ -338,7 +486,73 @@
         var url = window.location.href;
         var isDashboard = url.indexOf('/portal/dashboard') !== -1;
         var isLoginPage = url.indexOf('auth/login') !== -1 || (url.indexOf('faveo') !== -1 && url.indexOf('/login') !== -1);
+        var isResetPage = url.indexOf('auth/resetpwd') !== -1;
         var popup = document.getElementById('favLoginPopup');
+ 
+        // 🚀 NEW: Detect 'OTP sent successfully' on Reset Page
+        if (isResetPage) {
+            // Check for success message in DOM more robustly
+            var allDivs = document.querySelectorAll('div');
+            var msgDiv = null;
+            for (var i = 0; i < allDivs.length; i++) {
+                var d = allDivs[i];
+                if (d.innerText && d.innerText.includes('OTP sent successfully') && (d.style.color === 'green' || d.getAttribute('style')?.includes('color: green'))) {
+                    msgDiv = d;
+                    break;
+                }
+            }
+
+            if (msgDiv && (!popup.dataset.waitingForResetOtp || popup.dataset.waitingForResetOtp === 'false')) {
+                console.log('✅ [favLogin] Reset OTP Sent Detected! Switching UI...');
+                popup.dataset.waitingForResetOtp = 'true'; // Prevent duplicate triggers
+                
+                chrome.storage.local.get(['favPendingResetAgent'], function(res) {
+                    if (res.favPendingResetAgent) {
+                        var listContainer = document.getElementById('agentListContainer');
+                        if (listContainer) {
+                             // Clear "Please wait..." state before switching to OTP
+                             listContainer.innerHTML = ''; 
+                             // Re-add header card
+                             var activeCard = document.createElement('div');
+                             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
+                             activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + (res.favPendingResetAgent.agent_name || 'Agent') + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + (res.favPendingResetAgent.agent_id || '--') + '</div></div>';
+                             listContainer.appendChild(activeCard);
+                             
+                             updateUIToOTPState(res.favPendingResetAgent, listContainer);
+                        }
+                    }
+                });
+            }
+
+            chrome.storage.local.get(['favPendingResetId'], function(res) {
+                if (res.favPendingResetId) {
+                    var resetId = res.favPendingResetId;
+                    console.log('⚡ Autofilling Reset Password for:', resetId);
+                    
+                    var checkInterval = setInterval(function() {
+                        var idInput = document.querySelector('input[formcontrolname="userId"]');
+                        var genBtn = document.getElementById('gen_otp_btn');
+                        
+                        if (idInput && genBtn) {
+                            clearInterval(checkInterval);
+                            idInput.value = resetId;
+                            idInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            idInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            idInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                            
+                            setTimeout(function() {
+                                genBtn.disabled = false;
+                                genBtn.click();
+                                chrome.storage.local.remove(['favPendingResetId']); // 🧹 Cleanup
+                            }, 500);
+                        }
+                    }, 500);
+                    
+                    // Stop after 10s if not found
+                    setTimeout(function() { clearInterval(checkInterval); }, 10000);
+                }
+            });
+        }
 
         // If URL changed and we are now on a login page, clear inputs immediately and with retries
         if (url !== lastObservedUrl) {

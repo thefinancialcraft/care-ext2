@@ -327,5 +327,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     return true; // Keep channel open
   }
+  else if (message.type === 'UPDATE_PASSWORD') {
+    // 🚀 NEW: Update password in Google Sheet via Apps Script
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=update_password';
+    
+    fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(message.payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        console.log('✅ Sheet Update Result:', data);
+        sendResponse(data);
+    })
+    .catch(err => {
+        console.error('❌ Failed to update password in Sheet:', err);
+        sendResponse({ success: false, error: err.message });
+    });
+    return true; // Keep channel open
+  }
 });
 
