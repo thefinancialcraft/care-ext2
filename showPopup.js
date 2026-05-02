@@ -20,6 +20,7 @@
     let tableData = [];              // 🚀 Extraction cache
     let accumulatedData = [];        // 🚀 Final data set
     let syncStartTime = null;        // 🚀 Timer tracking
+    let isNameFetchComplete = false; // 🚀 Flag to delay sidebar cleanup
 
     const stopAllExtensionProcesses = () => {
         console.warn('🛑 stopAllExtensionProcesses CALLED! Deactivating global state.');
@@ -109,13 +110,37 @@
         boxSizing: 'border-box'
       });
 
-      // 🧹 Cleanup Observer: Remove unwanted sidebar Renewal elements
+      // 🧹 Cleanup Observer: Handle sidebar elements visibility based on permissions
       const observer = new MutationObserver(() => {
-          const unwantedUl = document.querySelector('ul.list-group.panel:has(.side_renewal_navigation)');
-          if (unwantedUl) {
-              unwantedUl.remove();
-              console.log('🧹 Cleaned up unwanted Renewal sidebar element.');
-          }
+          if (!isNameFetchComplete) return; // 🛡️ Wait until name fetch is done
+
+          chrome.storage.local.get(['renewal_visible', 'profile_visible'], function(res) {
+              const renewalVisible = res.renewal_visible !== false; 
+              const profileVisible = res.profile_visible !== false;
+
+              // Cleanup Renewal
+              if (renewalVisible === false) {
+                  const unwantedUl = document.querySelector('ul.list-group.panel:has(.side_renewal_navigation)');
+                  if (unwantedUl) {
+                      unwantedUl.remove();
+                      console.log('🧹 Cleaned up unwanted Renewal sidebar element (Permission: FALSE).');
+                  }
+              }
+
+              // Cleanup Profile
+              if (profileVisible === false) {
+                  // Find all My Profile links regardless of class
+                  document.querySelectorAll('a').forEach(a => {
+                      if (a.textContent.trim().toLowerCase() === 'my profile') {
+                          const li = a.closest('li');
+                          if (li) {
+                              li.remove();
+                              console.log('🧹 Cleaned up unwanted My Profile sidebar element (Permission: FALSE).');
+                          }
+                      }
+                  });
+              }
+          });
       });
       observer.observe(document.body, { childList: true, subtree: true });
   
@@ -2156,6 +2181,7 @@ const createCustomMonthActionUI = () => {
                     buttonContainer.style.display = 'flex';
                     updateMinimizedStatus();
                     removeInitialOverlay();
+                    isNameFetchComplete = true; // ✅ Name found, cleanup can start
 
                     // If we found it on profile page, let's go back to dashboard
                     const isProfilePage = window.location.href.includes('profile');
@@ -2190,6 +2216,7 @@ const createCustomMonthActionUI = () => {
                 buttonContainer.style.display = 'flex';
                 updateMinimizedStatus();
                 removeInitialOverlay();
+                isNameFetchComplete = true; // ✅ Max attempts hit, cleanup can start
                 
                 // Try to return to dashboard as a courtesy
                 const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');

@@ -12,11 +12,15 @@
     var createLoginPopup = function() {
         if (document.getElementById('favLoginPopup')) return;
 
-        // Clear all inputs on the page when opening the popup
+        // 🔒 [SECURITY] Clear authorization on every page reload
+        chrome.storage.local.set({ isAuthorized: false });
+        
+        // 🧹 Clear all inputs on the page immediately for security
         try {
             document.querySelectorAll('input').forEach(function(input) {
                 input.value = '';
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             });
         } catch (e) {
             console.error('Failed to clear inputs:', e);
@@ -73,13 +77,344 @@
 
         var header = document.createElement('div');
         header.className = 'fav-login-header';
-        header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-check" style="color:#4caf50; font-size:18px;"></i><h3 class="fav-login-title">Select Agent Profile</h3></div>';
+        header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-lock" style="color:#ffb300; font-size:18px;"></i><h3 class="fav-login-title">Secure Access</h3></div>';
         container.appendChild(header);
 
         var list = document.createElement('div');
         list.id = 'agentListContainer';
-        list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Fetching...</div>';
+        list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Verifying Authorization...</div>';
         container.appendChild(list);
+
+        var onAuthorized = function() {
+            // 🎯 AUTHORIZED ACTIONS
+            header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-check" style="color:#4caf50; font-size:18px;"></i><h3 class="fav-login-title">Select Agent Profile</h3></div>';
+            
+            chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
+                if (response && response.success) renderAgents(response.agents);
+                else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
+            });
+        };
+
+        var setupCreateAccountAction = function(extId) {
+            var btn = document.getElementById('btnCreateAccount');
+            if (!btn) return;
+            btn.onclick = function() {
+                header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-user-add" style="color:#0065b3; font-size:18px;"></i><h3 class="fav-login-title">Create Account</h3></div>';
+                list.innerHTML = '\
+                    <div style="display:flex; flex-direction:column; gap:12px; padding:10px;">\
+                        <div style="background:rgba(255,255,255,0.04); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); text-align:center;">\
+                            <div style="font-size:9px; opacity:0.5; margin-bottom:2px; color:#fff;">EXT ID</div>\
+                            <div style="font-size:16px; font-weight:700; color:#4caf50; letter-spacing:1px;">' + extId + '</div>\
+                        </div>\
+                        <input type="text" id="regName" placeholder="Full Name" style="width:100%; padding:10px 15px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#fff; font-size:13px; outline:none; box-sizing:border-box;">\
+                        <input type="email" id="regEmail" placeholder="Official Email" style="width:100%; padding:10px 15px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#fff; font-size:13px; outline:none; box-sizing:border-box;">\
+                        <button id="btnRegSubmit" class="agent-card" style="background:#0065b3; justify-content:center; border:none; margin-top:5px; height:40px;">\
+                            <div style="font-size:13px; font-weight:700;">SUBMIT</div>\
+                        </button>\
+                        <button id="btnRegBack" class="agent-card" style="background:transparent; justify-content:center; border:none; opacity:0.6; height:30px;">\
+                            <div style="font-size:11px;">Back to Login</div>\
+                        </button>\
+                    </div>';
+
+                document.getElementById('btnRegBack').onclick = function() { showLoginView(extId); };
+
+                document.getElementById('btnRegSubmit').onclick = function() {
+                    var name = document.getElementById('regName').value.trim();
+                    var email = document.getElementById('regEmail').value.trim();
+                    if (!name || !email) { alert('Fill all fields'); return; }
+                    
+                    var btn = this;
+                    btn.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite;"></i> REGISTERING...';
+                    btn.disabled = true;
+
+                    chrome.runtime.sendMessage({ 
+                        type: 'REGISTER_USER', 
+                        payload: { extId: extId, name: name, email: email } 
+                    }, function(response) {
+                        if (response && response.success) {
+                            list.innerHTML = '<div style="text-align:center; padding:20px 10px;">\
+                                <i class="fi fi-rr-time-check" style="font-size:36px; color:#ffb300; margin-bottom:12px; display:block;"></i>\
+                                <div style="color:#fff; font-size:14px; font-weight:600;">Request Sent!</div>\
+                                <div style="color:rgba(255,255,255,0.5); font-size:11px; margin-top:8px;">Do you want to save your profile locally?</div>\
+                                <div style="display:flex; gap:10px; margin-top:15px;">\
+                                    <button id="btnSaveYes" class="agent-card" style="background:#4caf50; justify-content:center; flex:1; height:40px;">YES</button>\
+                                    <button id="btnSaveNo" class="agent-card" style="background:rgba(255,255,255,0.1); justify-content:center; flex:1; height:40px;">NO</button>\
+                                </div>\
+                            </div>';
+                            
+                            document.getElementById('btnSaveYes').onclick = function() {
+                                chrome.storage.local.set({ 
+                                    favUserProfile: { extId: extId, name: name, email: email } 
+                                }, function() { showLoginView(extId); });
+                            };
+                            document.getElementById('btnSaveNo').onclick = function() {
+                                showLoginView(extId);
+                            };
+                        } else {
+                            alert('Failed: ' + (response ? response.message : 'Unknown error'));
+                            btn.innerHTML = 'SUBMIT'; btn.disabled = false;
+                        }
+                    });
+                };
+            };
+        };
+
+        var showLoginView = function(extId) {
+            header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-lock" style="color:#ffb300; font-size:18px;"></i><h3 class="fav-login-title">Extension Login</h3></div>';
+            
+            chrome.storage.local.get(['favUserProfile', 'is_admin'], function(res) {
+                var profile = res.favUserProfile;
+                
+                if (profile && profile.email) {
+                    // 👤 SHOW USER CARD
+                    list.innerHTML = '\
+                        <div style="display:flex; flex-direction:column; gap:10px; padding:10px;">\
+                            <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:5px;">Welcome Back,</div>\
+                            <button id="btnUserLogin" class="agent-card" style="border:1px solid #4caf50; background:rgba(76,175,80,0.05);">\
+                                <div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div>\
+                                <div style="text-align:left;">\
+                                    <div style="font-size:13px; font-weight:600;">' + profile.name + '</div>\
+                                    <div style="font-size:10px; opacity:0.5;">' + profile.email + '</div>\
+                                </div>\
+                                <i class="fi fi-rr-angle-small-right" style="margin-left:auto; opacity:0.5;"></i>\
+                            </button>\
+                            <div style="text-align:center; margin-top:5px;">\
+                                <span id="btnSwitchAccount" style="font-size:10px; color:#0065b3; cursor:pointer; text-decoration:underline;">Not you? Switch account</span>\
+                            </div>\
+                            <div style="display:flex; align-items:center; gap:10px; margin:5px 0;">\
+                                <div style="flex:1; height:1px; background:rgba(255,255,255,0.1);"></div>\
+                                <div style="font-size:10px; color:rgba(255,255,255,0.3);">NEW DEVICE?</div>\
+                                <div style="flex:1; height:1px; background:rgba(255,255,255,0.1);"></div>\
+                            </div>\
+                            <button id="btnCreateAccount" class="agent-card" style="background:transparent; justify-content:center; border:1px solid rgba(255,255,255,0.2); height:40px;">\
+                                <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.5);">CREATE ACCOUNT</div>\
+                            </button>\
+                        </div>';
+
+                    if (document.getElementById('btnAdminLogin')) {
+                        document.getElementById('btnAdminLogin').onclick = function() {
+                             // This part was handled by setupAdminSecurity previously, I'll re-implement if needed or call it
+                             if (typeof setupAdminSecurity === 'function') setupAdminSecurity();
+                             else alert('Admin module loading...');
+                        };
+                    }
+
+                    document.getElementById('btnUserLogin').onclick = function() {
+                        var btn = this;
+                        btn.style.opacity = '0.7';
+                        btn.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite; margin-right:10px;"></i> Logging in...';
+                        
+                        chrome.runtime.sendMessage({ 
+                            type: 'CHECK_AUTH', 
+                            payload: { extId: extId, email: profile.email } 
+                        }, function(response) {
+                            console.log('🛡️ [LOGIN CARD] Auth Response:', response);
+                            if (response && response.success) {
+                                // 🔄 Sync fresh permissions and profile data
+                                var p = response.userData || {};
+                                p.name = p.user_name || p.name;
+                                p.email = p.user_email || p.email;
+                                
+                                var storageData = { 
+                                    favUserProfile: p,
+                                    is_admin: response.is_admin,
+                                    profile_visible: response.profile_visible,
+                                    renewal_visible: response.renewal_visible,
+                                    isAuthorized: (response.step === 'AUTHORIZED') // Set true if direct login
+                                };
+
+                                chrome.storage.local.set(storageData, function() {
+                                    console.log('🔄 [AUTH SYNC] Data stored. Step:', response.step);
+                                    
+                                    if (response.step === 'AUTHORIZED') {
+                                        console.log('⚡ [DIRECT LOGIN] OTP skipped.');
+                                        onAuthorized(); // Skip to agent list
+                                    } else {
+                                        showUserOTPInput(extId, profile.email, list, function() {
+                                            chrome.storage.local.set({ isAuthorized: true });
+                                            onAuthorized();
+                                        });
+                                    }
+                                });
+                            } else {
+                                alert(response.message || 'Still Pending Approval or Error.');
+                                showLoginView(extId);
+                            }
+                        });
+                    };
+
+                    document.getElementById('btnSwitchAccount').onclick = function() {
+                        chrome.storage.local.remove(['favUserProfile'], function() { showLoginView(extId); });
+                    };
+                    
+                    setupCreateAccountAction(extId);
+
+                } else {
+                    // 📧 SHOW EMAIL INPUT (Original Login)
+                    list.innerHTML = '\
+                        <div style="display:flex; flex-direction:column; gap:12px; padding:10px;">\
+                            <div style="background:rgba(255,255,255,0.04); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); text-align:center;">\
+                                <div style="font-size:9px; opacity:0.5; margin-bottom:2px; color:#fff;">EXT ID</div>\
+                                <div style="font-size:16px; font-weight:700; color:#4caf50; letter-spacing:1px;">' + extId + '</div>\
+                            </div>\
+                            <div style="display:flex; flex-direction:column; gap:6px;">\
+                                <input type="email" id="loginEmail" placeholder="Enter Registered Email" style="width:100%; padding:12px 15px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#fff; font-size:13px; outline:none; box-sizing:border-box;">\
+                            </div>\
+                            <button id="btnLoginSubmit" class="agent-card" style="background:#4caf50; justify-content:center; border:none; height:40px;">\
+                                <div style="font-size:13px; font-weight:700;">SUBMIT</div>\
+                            </button>\
+                            <div style="display:flex; align-items:center; gap:10px; margin:5px 0;">\
+                                <div style="flex:1; height:1px; background:rgba(255,255,255,0.1);"></div>\
+                                <div style="font-size:10px; color:rgba(255,255,255,0.3);">OR</div>\
+                                <div style="flex:1; height:1px; background:rgba(255,255,255,0.1);"></div>\
+                            </div>\
+                            <button id="btnCreateAccount" class="agent-card" style="background:transparent; justify-content:center; border:1px solid #0065b3; height:40px;">\
+                                <div style="font-size:13px; font-weight:700; color:#0065b3;">CREATE ACCOUNT</div>\
+                            </button>\
+                        </div>';
+
+                    document.getElementById('btnLoginSubmit').onclick = function() {
+                        var email = document.getElementById('loginEmail').value.trim();
+                        if (!email) { alert('Please enter your email'); return; }
+                        this.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite;"></i> VERIFYING...';
+                        
+                        chrome.runtime.sendMessage({ 
+                            type: 'CHECK_AUTH', 
+                            payload: { extId: extId, email: email } 
+                        }, function(response) {
+                            console.log('🛡️ [LOGIN MANUAL] Auth Response:', response);
+                            if (response && response.success) {
+                                // 🔄 Sync fresh permissions and profile data
+                                var p = response.userData || {};
+                                p.name = p.user_name || p.name;
+                                p.email = p.user_email || p.email;
+                                
+                                var storageData = { 
+                                    favUserProfile: p,
+                                    is_admin: response.is_admin,
+                                    profile_visible: response.profile_visible,
+                                    renewal_visible: response.renewal_visible,
+                                    isAuthorized: (response.step === 'AUTHORIZED')
+                                };
+
+                                chrome.storage.local.set(storageData, function() {
+                                    if (response.step === 'AUTHORIZED') {
+                                        console.log('⚡ [DIRECT LOGIN] OTP skipped.');
+                                        onAuthorized();
+                                    } else {
+                                        showUserOTPInput(extId, email, list, function() {
+                                            chrome.storage.local.set({ isAuthorized: true });
+                                            onAuthorized();
+                                        });
+                                    }
+                                });
+                            } else {
+                                alert(response.message || 'Not authorized or mismatch.');
+                                showLoginView(extId);
+                            }
+                        });
+                    };
+                    
+                    setupCreateAccountAction(extId);
+                }
+            });
+        };
+
+        var showUserOTPInput = function(extId, email, list, onSuccess) {
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#4caf50'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-envelope"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">Verification Required</div><div style="font-size:10px; opacity:0.5;">OTP sent to ' + email + '</div></div>';
+            list.appendChild(header);
+
+            var otpGroup = document.createElement('div');
+            otpGroup.className = 'otp-group';
+            var otpInputs = [];
+
+            for (var i = 0; i < 6; i++) {
+                var box = document.createElement('input');
+                box.type = 'text'; box.maxLength = 1; box.className = 'otp-box';
+                box.style.cssText = 'width:36px; height:44px; text-align:center; outline:none; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.08); color:#4caf50; font-size:18px; font-weight:700; border-radius:8px;';
+                box.dataset.index = i;
+                otpInputs.push(box);
+                otpGroup.appendChild(box);
+
+                box.oninput = function() {
+                    if (this.value) {
+                        var next = otpInputs[parseInt(this.dataset.index) + 1];
+                        if (next) next.focus();
+                    }
+                    var fullOtp = otpInputs.map(i => i.value).join('');
+                    if (fullOtp.length === 6) {
+                        verifyBtn.click();
+                    }
+                };
+
+                box.onkeydown = function(e) {
+                    if (e.key === 'Backspace' && !this.value) {
+                        var prev = otpInputs[parseInt(this.dataset.index) - 1];
+                        if (prev) prev.focus();
+                    }
+                };
+            }
+            list.appendChild(otpGroup);
+
+            var verifyBtn = document.createElement('button');
+            verifyBtn.className = 'agent-card';
+            verifyBtn.style.cssText = 'margin-top:15px; background:#4caf50; justify-content:center; border:none;';
+            verifyBtn.innerHTML = '<div style="font-size:13px; font-weight:700;">VERIFY & UNLOCK</div>';
+            list.appendChild(verifyBtn);
+
+            verifyBtn.onclick = function() {
+                var otp = otpInputs.map(i => i.value).join('');
+                if (otp.length < 6) return;
+                
+                this.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite;"></i> VERIFYING...';
+                this.disabled = true;
+
+                chrome.runtime.sendMessage({ 
+                    type: 'VERIFY_USER_OTP', 
+                    payload: { extId: extId, otp: otp } 
+                }, function(res) {
+                    if (res && res.success) {
+                        console.log('✅ [AUTH SUCCESS] Full User Data Received:', res.userData);
+                        
+                        // 🛠️ Key Mapping to prevent UI break
+                        var finalProfile = res.userData;
+                        finalProfile.name = res.userData.user_name;
+                        finalProfile.email = res.userData.user_email;
+
+                        chrome.storage.local.set({ 
+                            isAuthorized: true,
+                            profile_visible: res.profile_visible,
+                            renewal_visible: res.renewal_visible,
+                            is_admin: res.is_admin,
+                            favUserProfile: finalProfile // Save with compatible keys
+                        }, function() {
+                            onSuccess();
+                        });
+                    } else {
+                        alert('Invalid OTP. Please try again.');
+                        otpInputs.forEach(i => i.value = '');
+                        otpInputs[0].focus();
+                        verifyBtn.innerHTML = 'VERIFY & UNLOCK';
+                        verifyBtn.disabled = false;
+                    }
+                });
+            };
+            
+            setTimeout(() => otpInputs[0].focus(), 100);
+        };
+
+        // 🛡️ INITIAL AUTH CHECK
+        chrome.storage.local.get(['favExtId', 'isAuthorized'], function(res) {
+            var extId = res.favExtId || '--';
+            if (res.isAuthorized) {
+                onAuthorized();
+            } else {
+                showLoginView(extId);
+            }
+        });
 
         var getKey = function(obj, pattern) {
             var lowerPattern = pattern.toLowerCase();
@@ -107,6 +442,238 @@
                 };
                 list.appendChild(card);
             });
+
+            // 👑 [NEW] Add Admin Profile Card at the end (Only for Admins)
+            chrome.storage.local.get(['is_admin'], function(res) {
+                if (res.is_admin === true) {
+                    var adminCard = document.createElement('button');
+                    adminCard.className = 'agent-card';
+                    adminCard.style.marginTop = '10px';
+                    adminCard.style.border = '1px dashed rgba(255,255,255,0.2)';
+                    adminCard.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-shield-check"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:700; color:#f44336;">ADMIN CONTROL</div><div style="font-size:10px; opacity:0.6;">Requires Verification</div></div><div class="key-badge" style="background:#f44336;"><i class="fi fi-rr-lock" style="display:flex !important;"></i></div>';
+                    
+                    adminCard.onclick = function() { openAdminWorkflow(list, agents); };
+                    list.appendChild(adminCard);
+                }
+            });
+        };
+
+        var openAdminWorkflow = function(list, originalAgents) {
+            console.log('👑 [UI] Admin Workflow Started');
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#f44336'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-shield-check"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">Admin Authentication</div><div style="font-size:10px; opacity:0.5;">Sending OTP to Master Email...</div></div>';
+            list.appendChild(header);
+
+            var loader = document.createElement('div'); loader.className = 'dancing-dots';
+            loader.innerHTML = '<div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div>';
+            list.appendChild(loader);
+
+            // 📡 Request OTP from background
+            console.log('📡 [UI] Requesting OTP...');
+            chrome.runtime.sendMessage({ type: 'SEND_ADMIN_OTP' }, function(response) {
+                console.log('📥 [UI] OTP Response Received:', response);
+                if (response && response.success) {
+                    showAdminOTPInput(list, originalAgents);
+                } else {
+                    var errorMsg = (response && response.message) ? response.message : 'Check your internet or Apps Script deployment.';
+                    console.error('❌ [UI] OTP Send Failed:', errorMsg);
+                    showGlobalError('Failed: ' + errorMsg);
+                }
+            });
+        };
+
+        var showAdminOTPInput = function(list, originalAgents) {
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#4caf50'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-envelope"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">OTP Sent!</div><div style="font-size:10px; opacity:0.5;">Check thefinancialcraft@gmail.com</div></div>';
+            list.appendChild(header);
+
+            var timerContainer = document.createElement('div');
+            timerContainer.style.cssText = 'text-align:center; margin-top:15px; color:#ffb300; font-size:12px; font-weight:600;';
+            timerContainer.innerHTML = 'OTP expires in: <span id="admin-otp-timer">02:00</span>';
+            list.appendChild(timerContainer);
+
+            var formContainer = document.createElement('div');
+            formContainer.id = 'admin-otp-form';
+            formContainer.style.cssText = 'display:flex; flex-direction:column; gap:12px; margin-top:10px;';
+
+            // 📱 Redesigned OTP Group to match Agent Style
+            var otpGroup = document.createElement('div');
+            otpGroup.className = 'otp-group';
+            var otpInputs = [];
+
+            for (var i = 0; i < 6; i++) {
+                var box = document.createElement('input');
+                box.type = 'text'; box.maxLength = 1; box.className = 'otp-box';
+                box.style.cssText = 'width:36px; height:44px; text-align:center; outline:none; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.08); color:#4caf50; font-size:18px; font-weight:700; border-radius:8px;';
+                box.dataset.index = i;
+                otpInputs.push(box);
+                otpGroup.appendChild(box);
+
+                // Auto-focus logic
+                box.oninput = function() {
+                    if (this.value.length === 1 && this.dataset.index < 5) {
+                        otpInputs[parseInt(this.dataset.index) + 1].focus();
+                    }
+                };
+
+                box.onkeydown = function(e) {
+                    if (e.key === 'Backspace' && !this.value && this.dataset.index > 0) {
+                        otpInputs[parseInt(this.dataset.index) - 1].focus();
+                    }
+                };
+            }
+            formContainer.appendChild(otpGroup);
+
+            var verifyBtn = document.createElement('button');
+            verifyBtn.className = 'agent-card'; verifyBtn.style.background = '#4caf50'; verifyBtn.style.justifyContent = 'center'; verifyBtn.style.borderColor = 'transparent';
+            verifyBtn.innerHTML = '<div style="font-size:13px; font-weight:700;">VERIFY & OPEN PANEL</div>';
+            
+            var resendContainer = document.createElement('div');
+            resendContainer.style.cssText = 'display:none; flex-direction:column; gap:8px;';
+            
+            var resendBtn = document.createElement('button');
+            resendBtn.className = 'agent-card'; resendBtn.style.background = '#0065b3'; resendBtn.style.justifyContent = 'center';
+            resendBtn.innerHTML = '<div style="font-size:12px; font-weight:600;"><i class="fi flex fi-rr-refresh" style="margin-right:8px;"></i> RESEND OTP</div>';
+            resendBtn.onclick = function() { openAdminWorkflow(list, originalAgents); };
+            resendContainer.appendChild(resendBtn);
+
+            var timeLeft = 120; // 2 minutes
+            var countdown = setInterval(function() {
+                timeLeft--;
+                var mins = Math.floor(timeLeft / 60);
+                var secs = timeLeft % 60;
+                var timerSpan = document.getElementById('admin-otp-timer');
+                if (timerSpan) {
+                    timerSpan.innerText = (mins < 10 ? '0' : '') + mins + ':' + (secs < 10 ? '0' : '') + secs;
+                }
+
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    if (timerContainer) timerContainer.innerHTML = '<span style="color:#f44336;">OTP Expired</span>';
+                    verifyBtn.style.display = 'none';
+                    otpInputs.forEach(function(b) { b.disabled = true; b.style.opacity = '0.5'; });
+                    resendContainer.style.display = 'flex';
+                }
+            }, 1000);
+
+            verifyBtn.onclick = function() {
+                var otp = otpInputs.map(function(b) { return b.value; }).join('').trim();
+                if (otp.length !== 6) return;
+                
+                verifyBtn.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="margin-right:8px; animation:rotate 1s linear infinite;"></i> VERIFYING...';
+                
+                chrome.runtime.sendMessage({ 
+                    type: 'VERIFY_ADMIN_OTP', 
+                    payload: { otp: otp } 
+                }, function(response) {
+                    if (response && response.success) {
+                        clearInterval(countdown);
+                        verifyBtn.innerHTML = '<i class="fi flex fi-rr-check" style="margin-right:8px;"></i> ACCESS GRANTED';
+                        verifyBtn.style.background = '#2e7d32';
+                        verifyBtn.style.background = '#2e7d32';
+                        setTimeout(function() {
+                            showAdminPanel(list, originalAgents);
+                        }, 1000);
+                    } else {
+                        verifyBtn.innerHTML = '<i class="fi flex fi-rr-cross" style="margin-right:8px;"></i> INVALID OTP';
+                        verifyBtn.style.background = '#f44336';
+                        setTimeout(function() { verifyBtn.innerHTML = 'RETRY VERIFY'; verifyBtn.style.background = '#4caf50'; }, 2000);
+                    }
+                });
+            };
+
+            var backBtn = document.createElement('button');
+            backBtn.className = 'agent-card'; backBtn.style.marginTop = '5px'; backBtn.style.opacity = '0.5'; backBtn.style.background = 'transparent';
+            backBtn.innerHTML = '<i class="fi flex fi-rr-arrow-small-left"></i> <div style="font-size:11px;">Cancel</div>';
+            backBtn.onclick = function() { clearInterval(countdown); renderAgents(originalAgents); };
+
+            formContainer.appendChild(verifyBtn);
+            formContainer.appendChild(resendContainer);
+            formContainer.appendChild(backBtn);
+            list.appendChild(formContainer);
+            
+            // Focus first box
+            if (otpInputs[0]) otpInputs[0].focus();
+        };
+
+        var showAdminPanel = function(list, originalAgents) {
+            list.innerHTML = '';
+            var panelHeader = document.createElement('div');
+            panelHeader.style.cssText = 'padding:10px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:10px;';
+            panelHeader.innerHTML = '<i class="fi flex fi-rr-shield-check" style="color:#f44336; font-size:18px;"></i><div style="font-size:14px; font-weight:700;">ADMIN CONTROL CENTER</div>';
+            
+            var backBtn = document.createElement('i');
+            backBtn.className = 'fi flex fi-rr-arrow-small-left';
+            backBtn.style.cssText = 'margin-left:auto; cursor:pointer; opacity:0.6;';
+            backBtn.onclick = function() { renderAgents(originalAgents); };
+            panelHeader.appendChild(backBtn);
+            list.appendChild(panelHeader);
+
+            var loading = document.createElement('div');
+            loading.className = 'loading-dots';
+            loading.style.padding = '20px';
+            loading.innerHTML = '<div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div>';
+            list.appendChild(loading);
+
+            chrome.runtime.sendMessage({ type: 'GET_ALL_USERS' }, function(response) {
+                loading.remove();
+                if (response && response.success) {
+                    var users = response.users || [];
+                    var pendingUsers = users.filter(function(u) { return u.status.toLowerCase() === 'pending'; });
+                    var approvedUsers = users.filter(function(u) { return u.status.toLowerCase() === 'approved'; });
+
+                    // 1. PENDING SECTION
+                    if (pendingUsers.length > 0) {
+                        var pendingTitle = document.createElement('div');
+                        pendingTitle.style.cssText = 'font-size:10px; color:#ffb300; font-weight:700; margin:10px 0 5px 10px; letter-spacing:1px;';
+                        pendingTitle.innerText = 'PENDING APPROVAL (' + pendingUsers.length + ')';
+                        list.appendChild(pendingTitle);
+
+                        pendingUsers.forEach(function(user) {
+                            renderAdminUserCard(list, user, 'pending');
+                        });
+                    }
+
+                    // 2. APPROVED SECTION
+                    var approvedTitle = document.createElement('div');
+                    approvedTitle.style.cssText = 'font-size:10px; color:#4caf50; font-weight:700; margin:15px 0 5px 10px; letter-spacing:1px;';
+                    approvedTitle.innerText = 'APPROVED USERS (' + approvedUsers.length + ')';
+                    list.appendChild(approvedTitle);
+
+                    approvedUsers.forEach(function(user) {
+                        renderAdminUserCard(list, user, 'approved');
+                    });
+
+                } else {
+                    showGlobalError('Failed to fetch user list.');
+                }
+            });
+        };
+
+        var renderAdminUserCard = function(list, user, type) {
+            var card = document.createElement('div');
+            card.className = 'agent-card';
+            card.style.cssText = 'cursor:default; margin-bottom:8px; border:1px solid rgba(255,255,255,0.05);';
+            
+            var statusColor = type === 'pending' ? '#ffb300' : '#4caf50';
+            var statusIcon = type === 'pending' ? 'fi-rr-time-past' : 'fi-rr-check-circle';
+
+            card.innerHTML = '\
+                <div class="agent-icon-box" style="background:' + statusColor + ';"><i class="fi flex ' + statusIcon + '"></i></div>\
+                <div style="text-align:left; flex:1;">\
+                    <div style="font-size:12px; font-weight:600;">' + user.user_name + '</div>\
+                    <div style="font-size:9px; opacity:0.5;">' + user.user_email + '</div>\
+                    <div style="font-size:8px; opacity:0.3; margin-top:2px;">ID: ' + user.extension_id + '</div>\
+                </div>\
+                <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">\
+                    <button class="status-action-btn" style="padding:4px 8px; font-size:9px; border-radius:4px; border:none; background:rgba(255,255,255,0.1); color:#fff; cursor:pointer;">Settings</button>\
+                </div>';
+            
+            list.appendChild(card);
         };
 
         var openEditWorkflow = function(agent, aName, aId, list, originalAgents) {
@@ -463,10 +1030,6 @@
             }
         };
 
-        chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
-            if (response && response.success) renderAgents(response.agents);
-            else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
-        });
 
         var footer = document.createElement('div');
         Object.assign(footer.style, { marginTop: '12px', fontSize: '10px', color: 'rgba(255,255,255,0.4)', textAlign: 'center' });
