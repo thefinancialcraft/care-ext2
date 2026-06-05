@@ -2580,8 +2580,7 @@ const handleCustomMonthClick = () => {
             }
 
             setTimeout(() => {
-                const spinner = document.querySelector('.spinner'); 
-                if (spinner) spinner.remove();
+                document.querySelectorAll('.spinner, #loader-spinner').forEach(el => el.remove());
             }, 1000);
 
             if (isAutoSyncRunning) {
@@ -2637,9 +2636,9 @@ const handleCustomMonthClick = () => {
                 const nowContent = document.querySelector('.proposalDetails-tbl tbody')?.innerText.trim();
                 const nowRows = document.querySelectorAll('.proposalDetails-tbl tbody tr').length;
                 
-                if ((nowContent !== beforeContent && nowRows > 0) || attempts > 30) {
+                if ((nowContent !== beforeContent && nowRows > 0) || attempts > 180) {
                     clearInterval(checkLoad);
-                    if (attempts > 30) {
+                    if (attempts > 180) {
                         pauseExtractionWithError('Timeout waiting for page load.', nextPage);
                         return;
                     }
@@ -3346,6 +3345,7 @@ const handleCustomMonthClick = () => {
         });
 
         overlay.innerHTML = `
+            <button id="close-overlay-btn" style="position:absolute; top:20px; right:20px; background:transparent; border:none; color:rgba(255,255,255,0.7); font-size:35px; cursor:pointer; z-index:10002; line-height: 1; transition: 0.2s;">&times;</button>
             <div id="ttt-intro-box" style="text-align:center; max-width:400px; padding:20px; animation:fadeIn 0.8s ease;">
                 <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
                     <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both;"></div>
@@ -3398,11 +3398,19 @@ const handleCustomMonthClick = () => {
                 .ttt-cell.taken { cursor: default; }
                 .ttt-celebration-text { animation: win-scale 1s infinite ease-in-out; font-size: 24px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
                 .glitter { position: fixed; width: 10px; height: 10px; pointer-events: none; z-index: 10005; animation: glitter-fall 2s ease-out forwards; }
+                #close-overlay-btn:hover { color: #fff !important; transform: scale(1.1); }
             </style>
         `;
 
         document.body.appendChild(overlay);
         extractionOverlayEl = overlay;
+
+        const closeOverlayBtn = overlay.querySelector('#close-overlay-btn');
+        if (closeOverlayBtn) {
+            closeOverlayBtn.addEventListener('click', () => {
+                removeExtractionOverlay();
+            });
+        }
 
         const playGameSound = (type) => {
             try {
