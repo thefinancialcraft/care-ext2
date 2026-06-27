@@ -125,6 +125,24 @@
                       unwantedUl.remove();
                       console.log('🧹 Cleaned up unwanted Renewal sidebar element (Permission: FALSE).');
                   }
+                  
+                  // Cleanup Renewal Notification dropdown
+                  const renewalNotificationLink = document.querySelector('a[title="Policy Renewal Notification"]');
+                  if (renewalNotificationLink) {
+                      const notificationLi = renewalNotificationLink.closest('li');
+                      if (notificationLi) {
+                          notificationLi.remove();
+                          console.log('🧹 Cleaned up unwanted Policy Renewal Notification element (Permission: FALSE).');
+                      }
+                  }
+                  
+                  // Cleanup Renew Policy Now button/link
+                  document.querySelectorAll('a').forEach(a => {
+                      if (a.textContent.trim().toLowerCase() === 'renew policy now') {
+                          a.remove();
+                          console.log('🧹 Cleaned up unwanted Renew Policy Now button (Permission: FALSE).');
+                      }
+                  });
               }
 
               // Cleanup Profile
@@ -184,15 +202,7 @@
       });
       minimizeBtn.onclick = () => toggleMinimize();
 
-      const closeBtn = document.createElement('button');
-      closeBtn.innerHTML = '<i class="fi flex fi-br-cross"></i>';
-      Object.assign(closeBtn.style, {
-        background: 'transparent', color: '#bcbcbc', border: 'none', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
-      });
-      closeBtn.onclick = () => stopAllExtensionProcesses();
-  
       topBtnGroup.appendChild(minimizeBtn);
-      topBtnGroup.appendChild(closeBtn);
   
       const leftPart = document.createElement('div');
       Object.assign(leftPart.style, {
@@ -412,33 +422,7 @@
             resumeBackgroundProcess(); // 🚀 Trigger existing resume logic
         };
 
-        const closeBtn = document.createElement('button');
-        closeBtn.id = 'miniCloseBtn';
-        closeBtn.innerHTML = '<i class="fi flex fi-br-cross"></i>';
-        Object.assign(closeBtn.style, {
-            display: 'none', // 🚀 Hidden by default
-            background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
-            fontSize: '10px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
-            width: '24px', height: '24px', alignItems: 'center', justifyContent: 'center',
-            transition: 'all 0.2s'
-        });
-        closeBtn.title = 'Close Extension';
-        closeBtn.onclick = (e) => {
-            e.stopPropagation();
-            stopAllExtensionProcesses();
-        };
-        closeBtn.onmouseover = () => { 
-            closeBtn.style.background = 'rgba(244,67,54,0.3)'; 
-            closeBtn.style.color = '#fff'; 
-        };
-        closeBtn.onmouseout = () => { 
-            closeBtn.style.background = 'transparent'; 
-            closeBtn.style.color = 'rgba(255,255,255,0.5)'; 
-        };
-
-
-
-        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, resumeBtn, expandBtn, closeBtn, miniProgress);
+        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, resumeBtn, expandBtn, miniProgress);
         document.body.appendChild(bar);
 
         // 🚀 Enable Dragging ONLY for the Name Handle
@@ -3345,7 +3329,6 @@ const handleCustomMonthClick = () => {
         });
 
         overlay.innerHTML = `
-            <button id="close-overlay-btn" style="position:absolute; top:20px; right:20px; background:transparent; border:none; color:rgba(255,255,255,0.7); font-size:35px; cursor:pointer; z-index:10002; line-height: 1; transition: 0.2s;">&times;</button>
             <div id="ttt-intro-box" style="text-align:center; max-width:400px; padding:20px; animation:fadeIn 0.8s ease;">
                 <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
                     <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both;"></div>
@@ -3734,28 +3717,29 @@ const handleCustomMonthClick = () => {
                  clearInterval(intervalId);
                  return;
              }
-             const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head, span');
+             const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head, span, label.add_on_btn, b');
              possibleElems.forEach(elem => {
                 if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
-                   const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
-                   parentSpan.remove();
-                   console.log('💥 [ISOLATED POPUP] Digital Discount eliminated instantly!');
+                   const elementToRemove = elem.closest('label') || elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+                   if (elementToRemove && elementToRemove.parentNode) {
+                       elementToRemove.remove();
+                       console.log('💥 [ISOLATED POPUP] Digital Discount eliminated instantly!');
+                   }
                 }
              });
           }, 100);
        });
     };
 
-    // ====== MAIN RUNNER ======
     const runPopup = () => {
       // 🚀 Initial Cleanup
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
-      if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
-        // Destroy normal popup if exists
-        const oldPopup = document.getElementById('my-dashboard-popup');
-        if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
-        
+      const currentUrl = window.location.href;
+
+      // 1. Manage the Aggressive Discount Popup
+      if (currentUrl.includes('portal/rEportability/portabilityQuotation?planId=') || 
+          currentUrl.includes('portal/portability/portabilityProposal')) {
         // Create new aggressive popup
         if (!document.getElementById('digital-discount-remover-popup')) {
            createDigitalDiscountRemoverPopup();
@@ -3764,17 +3748,22 @@ const handleCustomMonthClick = () => {
         // Destroy aggressive popup if navigating away
         const quotePopup = document.getElementById('digital-discount-remover-popup');
         if (quotePopup) { quotePopup.style.display = 'none'; quotePopup.remove(); }
+      }
 
-        if (window.location.href.includes('/portal/dashboard')) {
-          if (!document.getElementById('my-dashboard-popup')) {
-            console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
-            const { popup, nameSpan, spinner, buttonContainer } = createPopup();
-            addSpinnerStyle();
-            setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
-            
-            setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
-          }
+      // 2. Manage the Main Dashboard Popup
+      if (currentUrl.startsWith('https://faveo.careinsurance.com/NewFaveo') && !currentUrl.includes('#auth/login') && !currentUrl.includes('#/auth/resetpwd')) {
+        if (!document.getElementById('my-dashboard-popup')) {
+          console.log("%c[UI] %cDashboard UI initialized for URL: %c" + currentUrl, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
+          const { popup, nameSpan, spinner, buttonContainer } = createPopup();
+          addSpinnerStyle();
+          setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
+          
+          setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
         }
+      } else {
+        // Destroy normal popup if navigating to excluded pages (like login)
+        const oldPopup = document.getElementById('my-dashboard-popup');
+        if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
       }
     };
     

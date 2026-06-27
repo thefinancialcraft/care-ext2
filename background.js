@@ -1,7 +1,7 @@
 function handlePopupInjection(tabId, url) {
   if (!url) return;
   
-  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard') || url.includes('/portal/rEportability/portabilityQuotation')) {
+  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo') && !url.includes('#auth/login') && !url.includes('#/auth/resetpwd')) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ['showPopup.js'],

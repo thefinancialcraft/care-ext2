@@ -97,13 +97,16 @@
     const digitalDiscount = res.digital_discount !== false;
     if (digitalDiscount === false) {
       const observer = new MutationObserver(() => {
-        if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
-          const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head');
+        if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=') || 
+            window.location.href.includes('portal/portability/portabilityProposal')) {
+          const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head, label.add_on_btn, span, b');
           possibleElems.forEach(elem => {
             if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
               console.log('🚫 [INSTANT AUTO-DETECT] Deleting Digital Discount element on redirect!');
-              const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
-              parentSpan.remove();
+              const elementToRemove = elem.closest('label') || elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+              if (elementToRemove && elementToRemove.parentNode) {
+                elementToRemove.remove();
+              }
             }
           });
         }
