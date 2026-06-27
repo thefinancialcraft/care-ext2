@@ -1,12 +1,27 @@
 (function() {
   // 🛡️ [VISIBILITY CONTROL] Hide unauthorized menu items
   function applyVisibilityPermissions() {
-    chrome.storage.local.get(['profile_visible', 'renewal_visible'], function(res) {
+    chrome.storage.local.get(['profile_visible', 'renewal_visible', 'digital_discount'], function(res) {
       // Default to true if not set
       const profileVisible = res.profile_visible !== false; 
       const renewalVisible = res.renewal_visible !== false;
+      const digitalDiscount = res.digital_discount !== false;
 
-      console.log('🛡️ [VISIBILITY] Profile:', profileVisible, 'Renewal:', renewalVisible);
+      console.log('🛡️ [VISIBILITY] Profile:', profileVisible, 'Renewal:', renewalVisible, 'Digital Discount:', digitalDiscount);
+
+      // 🛡️ [VISIBILITY CONTROL] Delete Digital Discount
+      if (digitalDiscount === false && window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
+        // Select all spans and paragraphs that might contain the text
+        const possibleElems = document.querySelectorAll('span, p.quote-head');
+        possibleElems.forEach(elem => {
+          if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
+            console.log('🚫 [VISIBILITY] Deleting Digital Discount element');
+            // Try to remove the container span if we found the inner text
+            const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+            parentSpan.remove();
+          }
+        });
+      }
 
       // Find all menu links
       const menuLinks = document.querySelectorAll('.list-group-item');
@@ -76,6 +91,26 @@
   // Run on load and repeat periodically
   applyVisibilityPermissions();
   setInterval(applyVisibilityPermissions, 2000);
+
+  // 🚀 INSTANT AUTO-DETECT FOR DIGITAL DISCOUNT (MutationObserver)
+  chrome.storage.local.get(['digital_discount'], function(res) {
+    const digitalDiscount = res.digital_discount !== false;
+    if (digitalDiscount === false) {
+      const observer = new MutationObserver(() => {
+        if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
+          const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head');
+          possibleElems.forEach(elem => {
+            if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
+              console.log('🚫 [INSTANT AUTO-DETECT] Deleting Digital Discount element on redirect!');
+              const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+              parentSpan.remove();
+            }
+          });
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  });
 
   if (window.location.href === 'https://faveo.careinsurance.com/NewFaveo/#/portal/proposals/proposalDetails') {
     console.log('View Proposals button available. Proceeding to extract table...');

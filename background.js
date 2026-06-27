@@ -1,13 +1,13 @@
 function handlePopupInjection(tabId, url) {
   if (!url) return;
   
-  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard')) {
+  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo/#/portal/dashboard') || url.includes('/portal/rEportability/portabilityQuotation')) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ['showPopup.js'],
     });
-    console.log('✅ Dashboard UI Injected into tab:', tabId);
-  } 
+    console.log('✅ Dashboard/Quotation UI Injected into tab:', tabId);
+  }
   else if (url.includes('#auth/login') || (url.includes('faveo') && url.includes('/login'))) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },

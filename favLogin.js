@@ -220,11 +220,18 @@
                                     is_admin: response.is_admin,
                                     profile_visible: response.profile_visible,
                                     renewal_visible: response.renewal_visible,
+                                    digital_discount: response.digital_discount,
                                     isAuthorized: (response.step === 'AUTHORIZED') // Set true if direct login
                                 };
 
                                 chrome.storage.local.set(storageData, function() {
                                     console.log('🔄 [AUTH SYNC] Data stored. Step:', response.step);
+                                    console.log('📊 [EXTENSION DB SETTINGS]:', {
+                                        isAdmin: response.is_admin,
+                                        profileVisible: response.profile_visible,
+                                        renewalVisible: response.renewal_visible,
+                                        digitalDiscount: response.digital_discount
+                                    });
                                     
                                     if (response.step === 'AUTHORIZED') {
                                         console.log('⚡ [DIRECT LOGIN] OTP skipped.');
@@ -294,10 +301,17 @@
                                     is_admin: response.is_admin,
                                     profile_visible: response.profile_visible,
                                     renewal_visible: response.renewal_visible,
+                                    digital_discount: response.digital_discount,
                                     isAuthorized: (response.step === 'AUTHORIZED')
                                 };
 
                                 chrome.storage.local.set(storageData, function() {
+                                    console.log('📊 [EXTENSION DB SETTINGS]:', {
+                                        isAdmin: response.is_admin,
+                                        profileVisible: response.profile_visible,
+                                        renewalVisible: response.renewal_visible,
+                                        digitalDiscount: response.digital_discount
+                                    });
                                     if (response.step === 'AUTHORIZED') {
                                         console.log('⚡ [DIRECT LOGIN] OTP skipped.');
                                         onAuthorized();
@@ -388,6 +402,7 @@
                             isAuthorized: true,
                             profile_visible: res.profile_visible,
                             renewal_visible: res.renewal_visible,
+                            digital_discount: res.digital_discount,
                             is_admin: res.is_admin,
                             favUserProfile: finalProfile // Save with compatible keys
                         }, function() {

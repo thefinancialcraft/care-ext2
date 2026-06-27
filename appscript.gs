@@ -42,6 +42,7 @@ function doGet(e) {
       IS_ADMIN: headers.indexOf('IS_ADMIN'),
       PROFILE: headers.indexOf('PROFILE_VISIBLE'),
       RENEWAL: headers.indexOf('RENEWAL_VISIBLE'),
+      DIGITAL_DISCOUNT: headers.indexOf('DIGITAL_DISCOUNT'),
       ACCESS: headers.indexOf('AGENT_ACCESS'),
       OTP_REQ: headers.indexOf('OTP_REQUIRED')
     };
@@ -94,16 +95,23 @@ function doGet(e) {
             is_admin: idx.IS_ADMIN !== -1 ? String(data[i][idx.IS_ADMIN]).toUpperCase() === "TRUE" : false,
             profile_visible: idx.PROFILE !== -1 ? String(data[i][idx.PROFILE]).toUpperCase() === "TRUE" : false,
             renewal_visible: idx.RENEWAL !== -1 ? String(data[i][idx.RENEWAL]).toUpperCase() === "TRUE" : false,
+            digital_discount: idx.DIGITAL_DISCOUNT !== -1 ? String(data[i][idx.DIGITAL_DISCOUNT]).toUpperCase() === "TRUE" : false,
             agent_access: idx.ACCESS !== -1 ? String(data[i][idx.ACCESS]) : "",
             otp_required: otpRequired
           };
+
+          console.log(`📊 [SHEET DATA FETCHED] for User: ${userName} (${rowEmailFinal})`);
+          console.log(`➡️ Ext ID: ${userData.extension_id}, Status: ${userData.status}`);
+          console.log(`➡️ Admin: ${userData.is_admin}, Profile Visible: ${userData.profile_visible}`);
+          console.log(`➡️ Renewal Visible: ${userData.renewal_visible}, Digital Discount: ${userData.digital_discount}`);
+          console.log(`➡️ Agent Access: ${userData.agent_access}, OTP Req: ${userData.otp_required}`);
 
           if (!otpRequired) {
             console.log('⚡ OTP NOT REQUIRED. Authorizing immediately.');
             sheet.getRange(i + 1, 6).setValue(new Date()); 
             return ContentService.createTextOutput(JSON.stringify({ 
               success: true, step: 'AUTHORIZED', userData: userData,
-              is_admin: userData.is_admin, profile_visible: userData.profile_visible, renewal_visible: userData.renewal_visible
+              is_admin: userData.is_admin, profile_visible: userData.profile_visible, renewal_visible: userData.renewal_visible, digital_discount: userData.digital_discount
             })).setMimeType(ContentService.MimeType.JSON);
           }
 
@@ -118,7 +126,7 @@ function doGet(e) {
             
             return ContentService.createTextOutput(JSON.stringify({ 
               success: true, step: 'OTP_SENT', email: rowEmailFinal, userData: userData,
-              is_admin: userData.is_admin, profile_visible: userData.profile_visible, renewal_visible: userData.renewal_visible
+              is_admin: userData.is_admin, profile_visible: userData.profile_visible, renewal_visible: userData.renewal_visible, digital_discount: userData.digital_discount
             })).setMimeType(ContentService.MimeType.JSON);
           } catch (err) {
             console.error('❌ MailApp Error:', err.message);
@@ -157,6 +165,7 @@ function doGet(e) {
         is_admin: idx.IS_ADMIN !== -1 ? String(data[i][idx.IS_ADMIN]).toUpperCase() === "TRUE" : false,
         profile_visible: idx.PROFILE !== -1 ? String(data[i][idx.PROFILE]).toUpperCase() === "TRUE" : false,
         renewal_visible: idx.RENEWAL !== -1 ? String(data[i][idx.RENEWAL]).toUpperCase() === "TRUE" : false,
+        digital_discount: idx.DIGITAL_DISCOUNT !== -1 ? String(data[i][idx.DIGITAL_DISCOUNT]).toUpperCase() === "TRUE" : false,
         agent_access: idx.ACCESS !== -1 ? String(data[i][idx.ACCESS] || "") : "",
         otp_required: (idx.OTP_REQ !== -1 && (data[i][idx.OTP_REQ] === null || data[i][idx.OTP_REQ] === undefined || data[i][idx.OTP_REQ] === "")) ? false : (idx.OTP_REQ !== -1 ? String(data[i][idx.OTP_REQ]).trim().toUpperCase() === "TRUE" : false)
       });
@@ -173,6 +182,14 @@ function doGet(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName("user_data");
     const data = sheet.getDataRange().getValues();
+    const headers = data[0].map(h => String(h).trim().toUpperCase());
+    const idx = {
+      IS_ADMIN: headers.indexOf('IS_ADMIN'),
+      PROFILE: headers.indexOf('PROFILE_VISIBLE'),
+      RENEWAL: headers.indexOf('RENEWAL_VISIBLE'),
+      DIGITAL_DISCOUNT: headers.indexOf('DIGITAL_DISCOUNT'),
+      ACCESS: headers.indexOf('AGENT_ACCESS')
+    };
     
     for (let i = 1; i < data.length; i++) {
       if (String(data[i][0]).replace(/,/g, '').trim() === extId) {
@@ -186,10 +203,11 @@ function doGet(e) {
             user_name: String(data[i][1]),
             user_email: String(data[i][2]),
             status: String(data[i][4]),
-            is_admin: String(data[i][6]).toUpperCase() === "TRUE",
-            profile_visible: String(data[i][7]).toUpperCase() === "TRUE",
-            renewal_visible: String(data[i][8]).toUpperCase() === "TRUE",
-            agent_access: String(data[i][9])
+            is_admin: idx.IS_ADMIN !== -1 ? String(data[i][idx.IS_ADMIN]).toUpperCase() === "TRUE" : String(data[i][6]).toUpperCase() === "TRUE",
+            profile_visible: idx.PROFILE !== -1 ? String(data[i][idx.PROFILE]).toUpperCase() === "TRUE" : String(data[i][7]).toUpperCase() === "TRUE",
+            renewal_visible: idx.RENEWAL !== -1 ? String(data[i][idx.RENEWAL]).toUpperCase() === "TRUE" : String(data[i][8]).toUpperCase() === "TRUE",
+            digital_discount: idx.DIGITAL_DISCOUNT !== -1 ? String(data[i][idx.DIGITAL_DISCOUNT]).toUpperCase() === "TRUE" : false,
+            agent_access: idx.ACCESS !== -1 ? String(data[i][idx.ACCESS]) : String(data[i][9])
           };
 
           return ContentService.createTextOutput(JSON.stringify({ 
@@ -198,7 +216,8 @@ function doGet(e) {
             // Keep these for backward compatibility if needed
             is_admin: userData.is_admin,
             profile_visible: userData.profile_visible,
-            renewal_visible: userData.renewal_visible
+            renewal_visible: userData.renewal_visible,
+            digital_discount: userData.digital_discount
           })).setMimeType(ContentService.MimeType.JSON);
         }
         break;

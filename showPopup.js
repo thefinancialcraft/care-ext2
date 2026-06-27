@@ -3693,19 +3693,87 @@ const handleCustomMonthClick = () => {
         }
     };
 
+    // ====== DIGITAL DISCOUNT ISOLATED REMOVER ======
+    const createDigitalDiscountRemoverPopup = () => {
+       chrome.storage.local.get(['digital_discount'], function(res) {
+          if (res.digital_discount !== false) return; // Only do it if access is false
+
+          const dot = document.createElement('div');
+          dot.id = 'digital-discount-remover-popup';
+          Object.assign(dot.style, {
+             position: 'fixed',
+             bottom: '20px',
+             right: '20px',
+             width: '15px',
+             height: '15px',
+             borderRadius: '50%',
+             backgroundColor: 'red',
+             zIndex: '999999',
+             animation: 'blinkDot 1s infinite alternate'
+          });
+          
+          if (!document.getElementById('blinkDotStyle')) {
+             const style = document.createElement('style');
+             style.id = 'blinkDotStyle';
+             style.innerHTML = `
+                @keyframes blinkDot {
+                   0% { background-color: red; }
+                   100% { background-color: white; }
+                }
+             `;
+             document.head.appendChild(style);
+          }
+          
+          document.body.appendChild(dot);
+          console.log('🔴 Blinking dot initialized for Quotation URL. Aggressive removal started.');
+
+          // Aggressive removal logic (100ms loop)
+          const intervalId = setInterval(() => {
+             // Stop loop if the dot is destroyed (e.g. navigated away)
+             if (!document.getElementById('digital-discount-remover-popup')) {
+                 clearInterval(intervalId);
+                 return;
+             }
+             const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head, span');
+             possibleElems.forEach(elem => {
+                if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
+                   const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+                   parentSpan.remove();
+                   console.log('💥 [ISOLATED POPUP] Digital Discount eliminated instantly!');
+                }
+             });
+          }, 100);
+       });
+    };
+
     // ====== MAIN RUNNER ======
     const runPopup = () => {
       // 🚀 Initial Cleanup
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
-      if (window.location.href.includes('/portal/dashboard')) {
-        if (!document.getElementById('my-dashboard-popup')) {
-          console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
-          const { popup, nameSpan, spinner, buttonContainer } = createPopup();
-          addSpinnerStyle();
-          setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
-          
-          setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
+      if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
+        // Destroy normal popup if exists
+        const oldPopup = document.getElementById('my-dashboard-popup');
+        if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
+        
+        // Create new aggressive popup
+        if (!document.getElementById('digital-discount-remover-popup')) {
+           createDigitalDiscountRemoverPopup();
+        }
+      } else {
+        // Destroy aggressive popup if navigating away
+        const quotePopup = document.getElementById('digital-discount-remover-popup');
+        if (quotePopup) { quotePopup.style.display = 'none'; quotePopup.remove(); }
+
+        if (window.location.href.includes('/portal/dashboard')) {
+          if (!document.getElementById('my-dashboard-popup')) {
+            console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
+            const { popup, nameSpan, spinner, buttonContainer } = createPopup();
+            addSpinnerStyle();
+            setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
+            
+            setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
+          }
         }
       }
     };
