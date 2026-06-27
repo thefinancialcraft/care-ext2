@@ -3766,7 +3766,7 @@ const handleCustomMonthClick = () => {
         if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
       }
     };
-    
+
     // Run again when the URL hash changes (for hash-based SPA routing)
     window.addEventListener('hashchange', runPopup);
     
@@ -3782,7 +3782,7 @@ const handleCustomMonthClick = () => {
       }
     }, 1000);
     
-  
+
     loadIconCDN();
     runPopup();
   
