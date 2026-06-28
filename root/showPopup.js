@@ -3736,11 +3736,9 @@ const handleCustomMonthClick = () => {
       // 🚀 Initial Cleanup
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
+      // 1. Digital Discount Remover Popup
       if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=') || 
           window.location.href.includes('portal/portability/portabilityProposal')) {
-        // Destroy normal popup if exists
-        const oldPopup = document.getElementById('my-dashboard-popup');
-        if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
         
         // Create new aggressive popup
         if (!document.getElementById('digital-discount-remover-popup')) {
@@ -3750,18 +3748,22 @@ const handleCustomMonthClick = () => {
         // Destroy aggressive popup if navigating away
         const quotePopup = document.getElementById('digital-discount-remover-popup');
         if (quotePopup) { quotePopup.style.display = 'none'; quotePopup.remove(); }
+      }
 
-        const currentUrl = window.location.href;
-        if (currentUrl.startsWith('https://faveo.careinsurance.com/NewFaveo') && !currentUrl.includes('#auth/login') && !currentUrl.includes('#/auth/resetpwd')) {
-          if (!document.getElementById('my-dashboard-popup')) {
-            console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
-            const { popup, nameSpan, spinner, buttonContainer } = createPopup();
-            addSpinnerStyle();
-            setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
-            
-            setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
-          }
+      // 2. Main Dashboard Popup
+      const currentUrl = window.location.href;
+      if (currentUrl.startsWith('https://faveo.careinsurance.com/NewFaveo') && !currentUrl.includes('#auth/login') && !currentUrl.includes('#/auth/resetpwd')) {
+        if (!document.getElementById('my-dashboard-popup')) {
+          console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
+          const { popup, nameSpan, spinner, buttonContainer } = createPopup();
+          addSpinnerStyle();
+          setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
+          
+          setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
         }
+      } else {
+         const oldPopup = document.getElementById('my-dashboard-popup');
+         if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
       }
     };
     

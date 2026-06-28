@@ -1,6 +1,6 @@
 function handlePopupInjection(tabId, url) {
   if (!url) return;
-  
+
   if (url.startsWith('https://faveo.careinsurance.com/NewFaveo') && !url.includes('#auth/login') && !url.includes('#/auth/resetpwd')) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },
@@ -64,15 +64,15 @@ let uploadState = {
 let sourceTabId = null;
 
 function syncStateToStorage() {
-  chrome.storage.local.set({ 
-    tableDataToUpload, 
-    uploadState 
+  chrome.storage.local.set({
+    tableDataToUpload,
+    uploadState
   });
 }
 
 function startUploadLoop() {
   if (uploadState.isLoopRunning && !uploadState.isPaused && !uploadState.isError) {
-      return; 
+    return;
   }
 
   if (uploadState.currentIndex >= uploadState.total) {
@@ -113,38 +113,38 @@ function startUploadLoop() {
     body: encodedChunk,
     signal: controller.signal
   })
-  .then(response => response.text())
-  .then(text => {
-    clearTimeout(timeoutId);
-    let result;
-    try { result = JSON.parse(text); } catch (e) { throw new Error('Invalid Server Response'); }
+    .then(response => response.text())
+    .then(text => {
+      clearTimeout(timeoutId);
+      let result;
+      try { result = JSON.parse(text); } catch (e) { throw new Error('Invalid Server Response'); }
 
-    if (result.status === 'success') {
-      const timeTaken = Date.now() - startTime;
-      uploadState.uploaded += chunk.length;
-      uploadState.currentIndex += uploadState.chunkSize;
-      
-      const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
-      
-      sendUpdateToContent('UPLOAD_PROGRESS', {
-        progressPercent: percent,
-        uploadedCount: uploadState.uploaded,
-        totalCount: uploadState.total,
-        currentLead: chunk[0]
-      });
+      if (result.status === 'success') {
+        const timeTaken = Date.now() - startTime;
+        uploadState.uploaded += chunk.length;
+        uploadState.currentIndex += uploadState.chunkSize;
 
-      syncStateToStorage();
+        const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
+
+        sendUpdateToContent('UPLOAD_PROGRESS', {
+          progressPercent: percent,
+          uploadedCount: uploadState.uploaded,
+          totalCount: uploadState.total,
+          currentLead: chunk[0]
+        });
+
+        syncStateToStorage();
+        uploadState.isLoopRunning = false;
+        setTimeout(startUploadLoop, 1000);
+      } else {
+        throw new Error(result.message || 'Server Logic Error');
+      }
+    })
+    .catch(err => {
+      clearTimeout(timeoutId);
       uploadState.isLoopRunning = false;
-      setTimeout(startUploadLoop, 1000);
-    } else {
-      throw new Error(result.message || 'Server Logic Error');
-    }
-  })
-  .catch(err => {
-    clearTimeout(timeoutId);
-    uploadState.isLoopRunning = false;
-    handleUploadError(err.message);
-  });
+      handleUploadError(err.message);
+    });
 }
 
 function handleUploadError(errMsg) {
@@ -174,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender && sender.tab) sourceTabId = sender.tab.id;
     tableDataToUpload = message.payload;
     const firstPending = tableDataToUpload.findIndex(l => !l.isUploaded);
-    
+
     uploadState = {
       total: tableDataToUpload.length,
       uploaded: tableDataToUpload.filter(l => l.isUploaded).length,
@@ -192,14 +192,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'PAUSE_UPLOAD') {
     uploadState.isPaused = true;
     syncStateToStorage();
-    sendResponse({status: "paused"});
+    sendResponse({ status: "paused" });
   }
   else if (message.type === 'RESUME_UPLOAD') {
     chrome.storage.local.get(['tableDataToUpload', 'uploadState'], (result) => {
       if (result.tableDataToUpload) tableDataToUpload = result.tableDataToUpload;
       if (result.uploadState) uploadState = result.uploadState;
       uploadState.isPaused = false;
-      uploadState.isError = false; 
+      uploadState.isError = false;
       syncStateToStorage();
       startUploadLoop();
     });
@@ -214,9 +214,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   else if (message.type === 'PING') {
     sendResponse({ type: 'PONG' });
-  } 
+  }
   else if (message.type === 'FETCH_AGENTS') {
-    chrome.storage.local.get(['favExtId'], function(res) {
+    chrome.storage.local.get(['favExtId'], function (res) {
       const extId = res.favExtId || '';
       const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=forlogin&extId=' + extId;
       fetch(APPS_SCRIPT_URL)
@@ -229,13 +229,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'UPDATE_PASSWORD') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=update_password';
     fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(message.payload)
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(message.payload)
     })
-    .then(res => res.json())
-    .then(data => sendResponse(data))
-    .catch(err => sendResponse({ success: false, error: err.message }));
+      .then(res => res.json())
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'GET_ALL_USERS') {
@@ -248,33 +248,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'SEND_ADMIN_OTP') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=send_admin_otp';
     fetch(APPS_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' } })
-    .then(res => res.json())
-    .then(data => sendResponse(data))
-    .catch(err => sendResponse({ success: false, error: err.message }));
+      .then(res => res.json())
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'VERIFY_ADMIN_OTP') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=verify_admin_otp';
     fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(message.payload)
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(message.payload)
     })
-    .then(res => res.json())
-    .then(data => sendResponse(data))
-    .catch(err => sendResponse({ success: false, error: err.message }));
+      .then(res => res.json())
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'REGISTER_USER') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=register_user';
     fetch(APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(message.payload)
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(message.payload)
     })
-    .then(res => res.json())
-    .then(data => sendResponse(data))
-    .catch(err => sendResponse({ success: false, error: err.message }));
+      .then(res => res.json())
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'CHECK_AUTH') {
@@ -290,3 +290,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+let unlockedExtensions = false;
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // ... existing message handling ...
+  if (message.type === 'UNLOCK_EXTENSIONS') {
+    unlockedExtensions = true;
+    chrome.tabs.update(sender.tab.id, { url: 'chrome://extensions/' });
+    
+    let secondsLeft = 15;
+    chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+    chrome.action.setBadgeText({ text: String(secondsLeft) });
+    
+    const countdownInterval = setInterval(() => {
+      secondsLeft--;
+      if (secondsLeft > 0) {
+        chrome.action.setBadgeText({ text: String(secondsLeft) });
+      } else {
+        clearInterval(countdownInterval);
+        chrome.action.setBadgeText({ text: '' });
+      }
+    }, 1000);
+
+    // Lock it back after 15 seconds and close the extension tabs
+    setTimeout(() => {
+      unlockedExtensions = false;
+      
+      // Close the specific tab that was opened for extensions
+      if (sender.tab && sender.tab.id) {
+         chrome.tabs.remove(sender.tab.id).catch(() => {});
+      }
+      
+      // Also try to find any other chrome://extensions tabs (fallback)
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(t => {
+          if (t.url && (t.url === 'chrome://extensions/' || t.url.startsWith('chrome://extensions/?'))) {
+            chrome.tabs.remove(t.id).catch(() => {});
+          }
+        });
+      });
+    }, 15 * 1000);
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (tab.url && tab.url.includes('chrome://extensions/?id=')) {
+    chrome.tabs.remove(tabId);
+  } else if (tab.url && (tab.url === 'chrome://extensions/' || tab.url.startsWith('chrome://extensions/?')) && !unlockedExtensions) {
+    // Redirect to a custom extension page to ask for password
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL('auth.html') });
+  }
+});
+
