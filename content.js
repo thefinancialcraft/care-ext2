@@ -85,6 +85,26 @@
           }
         }
       });
+      
+      // 🛡️ [VISIBILITY CONTROL] Remove Policy Renewal Notification
+      const renewalNotification = document.querySelector('a[title="Policy Renewal Notification"]');
+      if (renewalNotification) {
+        const parentLi = renewalNotification.closest('li.dropdown');
+        if (renewalVisible === false) {
+          console.log('🚫 [VISIBILITY] Removing Policy Renewal Notification');
+          if (parentLi) parentLi.remove();
+          else renewalNotification.remove();
+        } else if (renewalVisible === true) {
+          // console.log('✅ [VISIBILITY] Showing Policy Renewal Notification'); // Optional log
+          if (parentLi) {
+            parentLi.style.display = '';
+            if (parentLi.hasAttribute('hidden')) parentLi.removeAttribute('hidden');
+          }
+          renewalNotification.style.display = '';
+          if (renewalNotification.hasAttribute('hidden')) renewalNotification.removeAttribute('hidden');
+        }
+      }
+
     });
   }
 
