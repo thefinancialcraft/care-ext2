@@ -3684,15 +3684,7 @@ const handleCustomMonthClick = () => {
           const dot = document.createElement('div');
           dot.id = 'digital-discount-remover-popup';
           Object.assign(dot.style, {
-             position: 'fixed',
-             bottom: '20px',
-             right: '20px',
-             width: '15px',
-             height: '15px',
-             borderRadius: '50%',
-             backgroundColor: 'red',
-             zIndex: '999999',
-             animation: 'blinkDot 1s infinite alternate'
+             display: 'none'
           });
           
           if (!document.getElementById('blinkDotStyle')) {
@@ -3712,8 +3704,9 @@ const handleCustomMonthClick = () => {
 
           // Aggressive removal logic (100ms loop)
           const intervalId = setInterval(() => {
-             // Stop loop if the dot is destroyed (e.g. navigated away)
-             if (!document.getElementById('digital-discount-remover-popup')) {
+             // Stop loop if navigated away from portal pages
+             const url = window.location.href;
+             if (!url.toLowerCase().includes('portal/')) {
                  clearInterval(intervalId);
                  return;
              }
@@ -3722,8 +3715,27 @@ const handleCustomMonthClick = () => {
                 if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
                    const elementToRemove = elem.closest('label') || elem.closest('span.a_on_btn') || elem.closest('span') || elem;
                    if (elementToRemove && elementToRemove.parentNode) {
-                       elementToRemove.remove();
-                       console.log('💥 [ISOLATED POPUP] Digital Discount eliminated instantly!');
+                       // 1. If it's a label with a 'for' attribute, find and remove the linked input
+                       if (elementToRemove.tagName === 'LABEL' && elementToRemove.htmlFor) {
+                           const linkedInput = document.getElementById(elementToRemove.htmlFor);
+                           if (linkedInput) linkedInput.remove();
+                       }
+                       // 2. Remove any previous sibling input (often <input><label>)
+                       if (elementToRemove.previousElementSibling && elementToRemove.previousElementSibling.tagName === 'INPUT') {
+                           elementToRemove.previousElementSibling.remove();
+                       }
+                       // 3. Remove any next sibling input (often <label><input>)
+                       if (elementToRemove.nextElementSibling && elementToRemove.nextElementSibling.tagName === 'INPUT') {
+                           elementToRemove.nextElementSibling.remove();
+                       }
+                       // 4. Try to remove the closest specific container if it exists
+                       const container = elementToRemove.closest('.add-on-box, .addon-item, .checkbox, .custom-control, li');
+                       if (container) {
+                           container.remove();
+                       } else {
+                           elementToRemove.remove();
+                       }
+                       console.log('💥 [ISOLATED POPUP] Digital Discount AND its button eliminated instantly!');
                    }
                 }
              });
@@ -3737,8 +3749,7 @@ const handleCustomMonthClick = () => {
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
       // 1. Digital Discount Remover Popup
-      if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=') || 
-          window.location.href.includes('portal/portability/portabilityProposal')) {
+      if (window.location.href.toLowerCase().includes('portal/')) {
         
         // Create new aggressive popup
         if (!document.getElementById('digital-discount-remover-popup')) {

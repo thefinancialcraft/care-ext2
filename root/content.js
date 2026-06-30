@@ -10,15 +10,31 @@
       console.log('🛡️ [VISIBILITY] Profile:', profileVisible, 'Renewal:', renewalVisible, 'Digital Discount:', digitalDiscount);
 
       // 🛡️ [VISIBILITY CONTROL] Delete Digital Discount
-      if (digitalDiscount === false && window.location.href.includes('portal/rEportability/portabilityQuotation?planId=')) {
+      if (digitalDiscount === false && window.location.href.toLowerCase().includes('portal/')) {
         // Select all spans and paragraphs that might contain the text
         const possibleElems = document.querySelectorAll('span, p.quote-head');
         possibleElems.forEach(elem => {
           if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
             console.log('🚫 [VISIBILITY] Deleting Digital Discount element');
-            // Try to remove the container span if we found the inner text
-            const parentSpan = elem.closest('span.a_on_btn') || elem.closest('span') || elem;
-            parentSpan.remove();
+            const elementToRemove = elem.closest('label') || elem.closest('span.a_on_btn') || elem.closest('span') || elem;
+            if (elementToRemove && elementToRemove.parentNode) {
+                if (elementToRemove.tagName === 'LABEL' && elementToRemove.htmlFor) {
+                    const linkedInput = document.getElementById(elementToRemove.htmlFor);
+                    if (linkedInput) linkedInput.remove();
+                }
+                if (elementToRemove.previousElementSibling && elementToRemove.previousElementSibling.tagName === 'INPUT') {
+                    elementToRemove.previousElementSibling.remove();
+                }
+                if (elementToRemove.nextElementSibling && elementToRemove.nextElementSibling.tagName === 'INPUT') {
+                    elementToRemove.nextElementSibling.remove();
+                }
+                const container = elementToRemove.closest('.add-on-box, .addon-item, .checkbox, .custom-control, li');
+                if (container) {
+                    container.remove();
+                } else {
+                    elementToRemove.remove();
+                }
+            }
           }
         });
       }
@@ -117,15 +133,29 @@
     const digitalDiscount = res.digital_discount !== false;
     if (digitalDiscount === false) {
       const observer = new MutationObserver(() => {
-        if (window.location.href.includes('portal/rEportability/portabilityQuotation?planId=') || 
-            window.location.href.includes('portal/portability/portabilityProposal')) {
+        if (window.location.href.toLowerCase().includes('portal/')) {
           const possibleElems = document.querySelectorAll('span.a_on_btn, p.quote-head, label.add_on_btn, span, b');
           possibleElems.forEach(elem => {
             if (elem.textContent && elem.textContent.trim().includes('Digital Discount')) {
               console.log('🚫 [INSTANT AUTO-DETECT] Deleting Digital Discount element on redirect!');
               const elementToRemove = elem.closest('label') || elem.closest('span.a_on_btn') || elem.closest('span') || elem;
               if (elementToRemove && elementToRemove.parentNode) {
-                elementToRemove.remove();
+                  if (elementToRemove.tagName === 'LABEL' && elementToRemove.htmlFor) {
+                      const linkedInput = document.getElementById(elementToRemove.htmlFor);
+                      if (linkedInput) linkedInput.remove();
+                  }
+                  if (elementToRemove.previousElementSibling && elementToRemove.previousElementSibling.tagName === 'INPUT') {
+                      elementToRemove.previousElementSibling.remove();
+                  }
+                  if (elementToRemove.nextElementSibling && elementToRemove.nextElementSibling.tagName === 'INPUT') {
+                      elementToRemove.nextElementSibling.remove();
+                  }
+                  const container = elementToRemove.closest('.add-on-box, .addon-item, .checkbox, .custom-control, li');
+                  if (container) {
+                      container.remove();
+                  } else {
+                      elementToRemove.remove();
+                  }
               }
             }
           });
