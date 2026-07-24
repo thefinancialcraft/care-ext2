@@ -439,21 +439,27 @@
     };
 
     const setMinimizedView = (shouldBeMinimized = true) => {
-        const popup = document.getElementById('my-dashboard-popup');
-        const compactBar = document.getElementById('compactStatusBar') || createMinimizedBar();
-        
-        console.log("%c[UI] %csetMinimizedView called: %c" + (shouldBeMinimized ? "MINIMIZE" : "EXPAND"), "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#FFB74D; font-weight:bold;");
-        
-        if (shouldBeMinimized) {
-            // MINIMIZE
-            if (popup) popup.style.display = 'none';
-            compactBar.style.display = 'flex';
-            updateMinimizedStatus(true);
-        } else {
-            // EXPAND
-            compactBar.style.display = 'none';
-            if (popup) popup.style.display = 'flex';
-        }
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active) {
+                shouldBeMinimized = false; // Force expanded view in Master Autopilot Mode
+            }
+
+            const popup = document.getElementById('my-dashboard-popup');
+            const compactBar = document.getElementById('compactStatusBar') || createMinimizedBar();
+            
+            console.log("%c[UI] %csetMinimizedView called: %c" + (shouldBeMinimized ? "MINIMIZE" : "EXPAND"), "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#FFB74D; font-weight:bold;");
+            
+            if (shouldBeMinimized) {
+                // MINIMIZE
+                if (popup) popup.style.display = 'none';
+                compactBar.style.display = 'flex';
+                updateMinimizedStatus(true);
+            } else {
+                // EXPAND
+                compactBar.style.display = 'none';
+                if (popup) popup.style.display = 'flex';
+            }
+        });
     };
 
     const toggleMinimize = () => {
@@ -616,7 +622,7 @@
         marginTop: '10px', display: 'none', flexWrap: 'wrap', gap: '10px', flexDirection: 'row',
       });
   
-      const buttonNames = ['Current Month', 'Custom Month', '⚡ Auto Sync'];
+      const buttonNames = ['Current Month', '1 Month', '2 Months', '3 Months', 'Custom Month', '⚡ Auto Sync'];
       buttonNames.forEach((name) => {
         const btn = document.createElement('button');
         btn.innerText = name;
@@ -631,6 +637,12 @@
   
         if (name === 'Current Month') {
           btn.onclick = () => handleCurrentMonthClick(popup);
+        } else if (name === '1 Month') {
+          btn.onclick = () => handleCustomMonthClick(popup, 1);
+        } else if (name === '2 Months') {
+          btn.onclick = () => handleCustomMonthClick(popup, 2);
+        } else if (name === '3 Months') {
+          btn.onclick = () => handleCustomMonthClick(popup, 3);
         } else if (name === 'Custom Month') {
           btn.onclick = () => handleCustomMonthClick(popup);
         } else if (name === '⚡ Auto Sync') {
@@ -639,6 +651,95 @@
   
         container.appendChild(btn);
       });
+
+      // ====== PREMIUM TOGGLE SWITCH FOR GOOGLE SHEET ======
+      const switchContainer = document.createElement('div');
+      Object.assign(switchContainer.style, {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        marginTop: '12px',
+        width: '100%',
+        padding: '8px 0 0 0',
+        borderTop: '1px dashed #ccc'
+      });
+
+      const switchLabelText = document.createElement('span');
+      switchLabelText.innerText = 'Google Sheet Sync';
+      Object.assign(switchLabelText.style, {
+        fontSize: '12px',
+        fontWeight: 'bold',
+        color: '#0065b3'
+      });
+
+      const label = document.createElement('label');
+      Object.assign(label.style, {
+        position: 'relative',
+        display: 'inline-block',
+        width: '36px',
+        height: '20px'
+      });
+
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.id = 'googleSheetToggle';
+      Object.assign(input.style, {
+        opacity: '0',
+        width: '0',
+        height: '0'
+      });
+
+      const slider = document.createElement('span');
+      Object.assign(slider.style, {
+        position: 'absolute',
+        cursor: 'pointer',
+        top: '0', left: '0', right: '0', bottom: '0',
+        backgroundColor: '#ccc',
+        transition: '.3s',
+        borderRadius: '20px'
+      });
+
+      const knob = document.createElement('span');
+      Object.assign(knob.style, {
+        position: 'absolute',
+        content: '""',
+        height: '14px', width: '14px',
+        left: '3px', bottom: '3px',
+        backgroundColor: 'white',
+        transition: '.3s',
+        borderRadius: '50%'
+      });
+      slider.appendChild(knob);
+
+      label.appendChild(input);
+      label.appendChild(slider);
+
+      const updateToggleStyle = (checked) => {
+        if (checked) {
+          slider.style.backgroundColor = '#0065b3';
+          knob.style.transform = 'translateX(16px)';
+        } else {
+          slider.style.backgroundColor = '#ccc';
+          knob.style.transform = 'translateX(0px)';
+        }
+      };
+
+      chrome.storage.local.get(['useGoogleSheet'], (res) => {
+        input.checked = res.useGoogleSheet || false;
+        updateToggleStyle(input.checked);
+      });
+
+      input.onchange = (e) => {
+        const checked = e.target.checked;
+        chrome.storage.local.set({ useGoogleSheet: checked }, () => {
+          updateToggleStyle(checked);
+          console.log('Google Sheet Sync toggled to:', checked);
+        });
+      };
+
+      switchContainer.appendChild(switchLabelText);
+      switchContainer.appendChild(label);
+      container.appendChild(switchContainer);
   
       return container;
     };
@@ -1807,7 +1908,7 @@ ttlAmt.onclick = () => {
 
     // ====== UI Component Function ======
     
-const createCustomMonthActionUI = () => {
+const createCustomMonthActionUI = (monthsBack) => {
     const container = document.createElement('div');
     container.id = 'customMonthActions';
     Object.assign(container.style, {
@@ -1869,8 +1970,14 @@ const createCustomMonthActionUI = () => {
         return `${dd}/${mm}/${yyyy}`;
     };
 
-    const firstOfMonth = new Date();
-    firstOfMonth.setDate(1);
+    let firstOfMonth;
+    if (monthsBack !== undefined) {
+        const todayTemp = new Date();
+        firstOfMonth = new Date(todayTemp.getFullYear(), todayTemp.getMonth() - monthsBack, 1);
+    } else {
+        firstOfMonth = new Date();
+        firstOfMonth.setDate(1);
+    }
     const today = new Date();
 
     const getNativeDate = (date) => {
@@ -1909,6 +2016,15 @@ const createCustomMonthActionUI = () => {
         syncToDom('from_date', nativeToWeb(nativeStart));
         syncToDom('to_date', nativeToWeb(nativeToday));
 
+        // Click search to reload table with new dates!
+        setTimeout(() => {
+            const proposalBtn = document.querySelector('.button.view_proposals_btn');
+            if (proposalBtn) {
+                console.log('🤖 Autopilot/CustomMonth: Clicking View Proposals to apply dates...');
+                proposalBtn.click();
+            }
+        }, 300);
+
         if (popStart) popStart.addEventListener('change', (e) => syncToDom('from_date', nativeToWeb(e.target.value)));
         if (popEnd) popEnd.addEventListener('change', (e) => syncToDom('to_date', nativeToWeb(e.target.value)));
 
@@ -1927,6 +2043,17 @@ const createCustomMonthActionUI = () => {
                     setTimeout(() => {
                         if (fromInput && popStart) popStart.value = webToNative(fromInput.value);
                         if (toInput && popEnd) popEnd.value = webToNative(toInput.value);
+
+                        // 🤖 Autopilot: Extraction is now managed by the state machine watchdog.
+                        // Do NOT trigger extraction here to avoid duplicate calls.
+                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+                            if (res.is_master_extension && res.is_autopilot_active) {
+                                console.log('🤖 Autopilot: 2-Month filter applied. State machine will handle extraction.');
+                                chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
+                                const customUI = document.getElementById('customMonthActions');
+                                if (customUI) customUI.remove();
+                            }
+                        });
                     }, 500);
                 }
             }, 200);
@@ -2245,12 +2372,60 @@ const createCustomMonthActionUI = () => {
         }, 1000);
       };
 
+      const handleMonthRangeSync = (passedPopup, monthsBack) => {
+        let popup = passedPopup;
+        if (!popup) popup = document.getElementById('my-dashboard-popup');
+        if (!popup) return console.log('Popup element not found.');
 
+        const buttonContainer = document.getElementById('mainActBtn');
+        if (buttonContainer) buttonContainer.remove();
+
+        const spinner = createSpinner();
+        spinner.style.display = 'flex'; // 🌪️ Show explicitly for extraction
+        popup.appendChild(spinner);
+
+        const today = new Date();
+        const startDate = new Date(today.getFullYear(), today.getMonth() - monthsBack, 1);
+        
+        const formatDate = (date) => {
+          const dd = String(date.getDate()).padStart(2, '0');
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const yyyy = date.getFullYear();
+          return `${dd}/${mm}/${yyyy}`;
+        };
+
+        const startVal = formatDate(startDate);
+        const endVal = formatDate(today);
+        console.log(`🔍 Intent: Applying filter [${startVal}] to [${endVal}]`);
+
+        const proposalBtn = document.querySelector('.button.view_proposals_btn');
+        proposalBtn?.click();
+
+        setTimeout(() => {
+          const fromInput = document.getElementById('from_date') || document.getElementById('from_date1');
+          const toInput = document.getElementById('to_date') || document.getElementById('to_date1');
+
+          if (fromInput && toInput) {
+            fromInput.value = startVal;
+            fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+            fromInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+            toInput.value = endVal;
+            toInput.dispatchEvent(new Event('input', { bubbles: true }));
+            toInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+
+          setTimeout(() => {
+            spinner.remove();
+            extractRenewalTableData();
+          }, 1500);
+        }, 3000);
+      };
 
       // Main Handler Function
-const handleCustomMonthClick = () => {
+const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
-    const popup = document.getElementById('my-dashboard-popup');
+    const popup = passedPopup || document.getElementById('my-dashboard-popup');
 
     popup.style.maxHeight = '500px';
   
@@ -2265,7 +2440,7 @@ const handleCustomMonthClick = () => {
     setTimeout(() => {
       spinner.remove();
   
-      const customUI = createCustomMonthActionUI();
+      const customUI = createCustomMonthActionUI(monthsBack);
       popup.appendChild(customUI);
     }, 3000);
   
@@ -2390,47 +2565,67 @@ const handleCustomMonthClick = () => {
       const oldCompleted = document.querySelectorAll('#completedExtractModal');
       oldCompleted.forEach(m => m.remove());
 
-      const spinner = createSpinner();
-      const popup = document.getElementById('my-dashboard-popup');  
-      if (spinner && popup) {
-          spinner.style.display = 'flex';
-          popup.appendChild(spinner);
-      }
-
-      // 🚀 SHOW ENTERTAINMENT OVERLAY
-      createExtractionOverlay();
-      if (popup) {
-        popup.appendChild(spinner);
-        
-        // 🚀 Add Live Extraction Modal
-        const extModal = document.createElement('div');
-        extModal.id = 'liveExtractModal';
-
-        // Show minimize button whenever any extraction starts
-        const minBtn = document.getElementById('toggleMinimizeBtn');
-        if (minBtn) minBtn.style.display = 'block';
-
-        Object.assign(extModal.style, {
-          marginTop: '10px', width: '100%', padding: '10px', 
-          background: '#e3f2fd', border: '1px solid #90caf9', 
-          borderRadius: '8px', textAlign: 'center', fontFamily: 'sans-serif',
-          boxSizing: 'border-box'
-        });
-        extModal.innerHTML = `
-           <h4 style="margin:0 0 8px 0; color:#1565c0; font-size:14px;">Extracting Leads...</h4>
-           <div style="font-size:12px; color:#e67e22; font-weight:bold; line-height:1.5;">
-              <p style="margin:0;">Current Page: <b id="liveExtPage">1</b></p>
-              <p style="margin:0;">Rows Found: <b id="liveExtRows">0</b></p>
-              <p style="margin:0;">Total Extracted: <b id="liveExtTotal">0</b></p>
-           </div>
-        `;
-        popup.appendChild(extModal);
-      }
-
       let retryCount = 0;
       const maxRetries = 40; // 🚀 Wait up to 20 seconds
 
       const startExtractionWithWait = () => {
+        // ⏳ Bypassing retries only if Faveo portal loading spinner is physically visible
+        // BUT: Once autopilot state machine is in START_EXTRACTION, do NOT pause for spinner
+        const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
+        const isLoaderVisible = faveoLoader && (
+            faveoLoader.offsetWidth > 0 || 
+            faveoLoader.offsetHeight > 0 || 
+            window.getComputedStyle(faveoLoader).display !== 'none'
+        );
+
+        // Only pause for spinner if extraction hasn't started yet (autopilotState != 'START_EXTRACTION')
+        const shouldPauseForSpinner = typeof autopilotState !== 'undefined' && autopilotState === 'START_EXTRACTION' ? false : true;
+        if (isLoaderVisible && shouldPauseForSpinner) {
+            console.log('⏳ Faveo page loading spinner is visible. Pausing extraction retries...');
+            setTimeout(startExtractionWithWait, 1000);
+            return;
+        }
+
+        // 🚀 Faveo loading finished! Create & show extraction overlay and live modal now
+        if (!document.getElementById('liveExtractModal')) {
+            const spinner = createSpinner();
+            const popup = document.getElementById('my-dashboard-popup');  
+            if (spinner && popup) {
+                spinner.style.display = 'flex';
+                popup.appendChild(spinner);
+            }
+
+            // 🚀 SHOW ENTERTAINMENT OVERLAY
+            createExtractionOverlay();
+            if (popup) {
+                popup.appendChild(spinner);
+                
+                // 🚀 Add Live Extraction Modal
+                const extModal = document.createElement('div');
+                extModal.id = 'liveExtractModal';
+
+                // Show minimize button whenever any extraction starts
+                const minBtn = document.getElementById('toggleMinimizeBtn');
+                if (minBtn) minBtn.style.display = 'block';
+
+                Object.assign(extModal.style, {
+                  marginTop: '10px', width: '100%', padding: '10px', 
+                  background: '#e3f2fd', border: '1px solid #90caf9', 
+                  borderRadius: '8px', textAlign: 'center', fontFamily: 'sans-serif',
+                  boxSizing: 'border-box'
+                });
+                extModal.innerHTML = `
+                   <h4 style="margin:0 0 8px 0; color:#1565c0; font-size:14px;">Extracting Leads...</h4>
+                   <div style="font-size:12px; color:#e67e22; font-weight:bold; line-height:1.5;">
+                      <p style="margin:0;">Current Page: <b id="liveExtPage">1</b></p>
+                      <p style="margin:0;">Rows Found: <b id="liveExtRows">0</b></p>
+                      <p style="margin:0;">Total Extracted: <b id="liveExtTotal">0</b></p>
+                   </div>
+                `;
+                popup.appendChild(extModal);
+            }
+        }
+
         const table = document.querySelector('.proposalDetails-tbl');
         const rows = table ? table.querySelectorAll('tbody tr') : [];
         const hasData = rows.length > 0 && !rows[0].textContent.toLowerCase().includes('no record');
@@ -2442,6 +2637,15 @@ const handleCustomMonthClick = () => {
             return;
           }
           console.log('Renewal table data not found after retries.');
+          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+              if (res.is_master_extension && res.is_autopilot_active) {
+                  console.log('🤖 Autopilot: Table loading failed. Retrying extraction in 10 seconds...');
+                  setTimeout(() => {
+                      retryCount = 0;
+                      startExtractionWithWait();
+                  }, 10000);
+              }
+          });
           return;
         }
 
@@ -2567,10 +2771,13 @@ const handleCustomMonthClick = () => {
                 document.querySelectorAll('.spinner, #loader-spinner').forEach(el => el.remove());
             }, 1000);
 
-            if (isAutoSyncRunning) {
-                console.log('⚡ AutoSync: Extraction complete. Starting automatic API upload...');
-                setTimeout(() => { sendDataToAppScript(); }, 2500);
-            }
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+                const autopilotActive = res.is_master_extension && res.is_autopilot_active;
+                if (isAutoSyncRunning || autopilotActive) {
+                    console.log('⚡ Autopilot/AutoSync: Extraction complete. Starting automatic API upload in 10s...');
+                    setTimeout(() => { sendDataToAppScript(); }, 10000);
+                }
+            });
         };
 
         const pauseExtractionWithError = (msg, page) => {
@@ -2759,7 +2966,9 @@ const handleCustomMonthClick = () => {
           p.avgChunkTime, 
           p.lastBatchTime, 
           p.chunkHistory, 
-          p.chunkSize
+          p.chunkSize,
+          false,
+          p.totalEstSeconds
         );
         console.log(`📊 [UI] Progress bar and stats updated.`);
         console.log(`---------------------------------------------------------`);
@@ -2770,12 +2979,56 @@ const handleCustomMonthClick = () => {
         isAutoSyncRunning = false; // 🚀 Reset UI state on error
         handleUploadErrorUI(message.payload);
         updateMinimizedStatus(); // 🔄 Reset UI
+
+        // 🤖 Autopilot Skip on Error
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents) {
+                const nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                chrome.storage.local.set({
+                    autopilot_index: nextIndex,
+                    autopilot_next_login_time: Date.now() + 5000 // Start next in 5 seconds
+                }, function() {
+                    console.log('⚠️ Autopilot: Upload failed, skipping to next agent in 5s...');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                });
+            }
+        });
+
       } else if (message.type === 'UPLOAD_COMPLETE') {
         const p = message.payload;
         console.log(`%c🏆 [COMPLETE] %cBackground confirmed final transmission.`, "color:#f1c40f; font-weight:bold; font-size:12px;", "color:#e67e22; font-weight:bold;");
         isAutoSyncRunning = false; // 🚀 Finished! Reset for next run
+        isExtractionPhaseDone = true;
         updateProgress(100, p.total, p.total, 0, null, null, null, null, 10, p.preChecked);
         updateMinimizedStatus(); // 🔄 Reset Super-Compact UI
+        if (!isGamePlaying && !isBirdPlaying) {
+            removeExtractionOverlay();
+        }
+
+        // 🤖 Autopilot Logout Trigger
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents) {
+                console.log('🤖 Autopilot: Sync complete! Automatically logging out in 10 seconds...');
+                setTimeout(() => {
+                    const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                    if (logoutBtn) {
+                        const nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                        chrome.storage.local.set({
+                            autopilot_index: nextIndex,
+                            autopilot_next_login_time: Date.now() + 60000 // 1 minute countdown starts
+                        }, function() {
+                            logoutBtn.click();
+                            console.log('🤖 Autopilot: Clicked logout button.');
+                        });
+                    } else {
+                        console.error('⚠️ Autopilot: Logout button not found! Attempting reload to retry...');
+                        window.location.reload();
+                    }
+                }, 10000);
+            }
+        });
       }
     });
 
@@ -2944,7 +3197,7 @@ const handleCustomMonthClick = () => {
         }
     }
 
-    function updateProgress(percent, uploadedCount = 0, totalCount = 0, estSecondsLeft = null, currentLead = null, avgChunkTime = null, lastBatchTime = null, chunkHistory = [], chunkSize = 10, preChecked = false) {
+    function updateProgress(percent, uploadedCount = 0, totalCount = 0, estSecondsLeft = null, currentLead = null, avgChunkTime = null, lastBatchTime = null, chunkHistory = [], chunkSize = 10, preChecked = false, totalEstSeconds = null) {
       if (avgChunkTime !== null) globalAvgChunkTime = avgChunkTime;
       
       // 🚀 Minimalist Interactive Line Graph
@@ -3026,8 +3279,9 @@ const handleCustomMonthClick = () => {
 
       if (estSecondsLeft !== null) {
          globalRemainingSeconds = estSecondsLeft;
+         const totalText = totalEstSeconds ? ` (Total: ${formatTime(totalEstSeconds)})` : '';
          const speedText = lastBatchTime ? ` | Batch: ${(lastBatchTime/1000).toFixed(1)}s` : '';
-         if (estTimeText) estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}${speedText}`;
+         if (estTimeText) estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}${totalText}${speedText}`;
          
          const resumeBtn = document.getElementById('resumeUploadBtn');
          const isPaused = resumeBtn && resumeBtn.style.display !== 'none';
@@ -3039,8 +3293,7 @@ const handleCustomMonthClick = () => {
                 if (globalRemainingSeconds > 0 && isAutoSyncRunning) {
                    globalRemainingSeconds--;
                    if (estTimeText) { 
-                       const speedText = lastBatchTime ? ` | Batch: ${(lastBatchTime/1000).toFixed(1)}s` : '';
-                       estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}${speedText}`;
+                       estTimeText.innerText = `Estimated Time: ${formatTime(globalRemainingSeconds)}${totalText}${speedText}`;
                        updateMinimizedStatus();
                    }
                 } else {
@@ -3292,7 +3545,7 @@ const handleCustomMonthClick = () => {
 
 
   
-    // 🎮 Tic-Tac-Toe Overlay Variables
+    // 🎮 Game Overlay Variables
     let isExtractionPhaseDone = false;
     let extractionOverlayEl = null;
     let tttBoard = Array(9).fill(null);
@@ -3302,8 +3555,40 @@ const handleCustomMonthClick = () => {
     let tttGameCount = 0; // 📉 Track games to prevent 1st match human win
     let tttIsBotDumbThisMatch = false; // 🤖 Match-level difficulty flag
 
+    // 🐦 Bird Game Variables
+    let isBirdPlaying = false;
+    let birdCanvas = null;
+    let birdCtx = null;
+    let birdAnimationId = null;
+    let birdY = 200;
+    let birdV = 0;
+    const birdG = 0.25;
+    const birdJump = -4.5;
+    const birdRadius = 12;
+    let obstacles = [];
+    let birdScore = 0;
+    let birdFrameCount = 0;
+
+    const handleJump = (e) => {
+        const container = document.getElementById('bird-game-container');
+        if (!container || container.style.display === 'none') return;
+
+        if (!isBirdPlaying) {
+            if (e.type === 'keydown' && e.code !== 'Space') return;
+            if (e.type === 'keydown') e.preventDefault();
+            startBirdGame();
+            return;
+        }
+        if (e.type === 'keydown' && e.code !== 'Space') return;
+        if (e.type === 'keydown') e.preventDefault(); // prevent scrolling
+        birdV = birdJump;
+    };
+
     const removeExtractionOverlay = () => {
         if (extractionOverlayEl) {
+            window.removeEventListener('keydown', handleJump);
+            isBirdPlaying = false;
+            if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
             extractionOverlayEl.style.opacity = '0';
             setTimeout(() => {
                 extractionOverlayEl?.remove();
@@ -3316,6 +3601,7 @@ const handleCustomMonthClick = () => {
         if (extractionOverlayEl) return;
         isExtractionPhaseDone = false;
         isGamePlaying = false;
+        isBirdPlaying = false;
         tttBoard = Array(9).fill(null);
 
         const overlay = document.createElement('div');
@@ -3339,13 +3625,22 @@ const handleCustomMonthClick = () => {
                     Sorry for the inconvenience, this scanning process will take a short amount of time. 
                     Want to play a quick game while we work?
                 </p>
-                <button id="start-ttt-btn" style="
-                    padding:12px 30px; border:none; border-radius:30px; 
-                    background: linear-gradient(135deg, #00c853, #64dd17); 
-                    color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
-                    box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
-                    Play Tic-Tac-Toe
-                </button>
+                <div style="display:flex; gap:15px; justify-content:center;">
+                  <button id="start-ttt-btn" style="
+                      padding:12px 30px; border:none; border-radius:30px; 
+                      background: linear-gradient(135deg, #00c853, #64dd17); 
+                      color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                      box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
+                      Play Tic-Tac-Toe
+                  </button>
+                  <button id="start-bird-btn" style="
+                      padding:12px 30px; border:none; border-radius:30px; 
+                      background: linear-gradient(135deg, #ff9100, #ffab40); 
+                      color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                      box-shadow: 0 4px 15px rgba(255,145,0,0.3); transition: transform 0.2s;">
+                      Play Bird Game
+                  </button>
+                </div>
             </div>
             
             <div id="ttt-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
@@ -3356,10 +3651,7 @@ const handleCustomMonthClick = () => {
                         grid-template-rows: repeat(3, 100px); gap:10px; 
                         background:rgba(255,255,255,0.1); padding:10px; border-radius:15px;
                         border: 2px solid rgba(255,255,255,0.2);">
-                        ${Array(9).fill(0).map((_, i) => `<div class="ttt-cell" data-index="${i}" style="
-                            width:100px; height:100px; background:rgba(255,255,255,0.05);
-                            border-radius:10px; display:flex; align-items:center; justify-content:center;
-                            font-size:40px; font-weight:bold; cursor:pointer; transition:0.2s;"></div>`).join('')}
+                        ${Array(9).fill(0).map((_, i) => '<div class="ttt-cell" data-index="' + i + '" style="width:100px; height:100px; background:rgba(255,255,255,0.05); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:40px; font-weight:bold; cursor:pointer; transition:0.2s;"></div>').join('')}
                     </div>
                     <!-- ✍️ Winning Line -->
                     <div id="ttt-win-line" style="
@@ -3369,6 +3661,34 @@ const handleCustomMonthClick = () => {
                     </div>
                 </div>
                 <div id="ttt-msg" style="margin-top:20px; font-weight:bold; min-height:60px;"></div>
+                <button id="back-ttt-btn" style="
+                    margin-top:15px; padding:8px 22px; border:none; border-radius:20px; 
+                    background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
+                    transition:background 0.2s;">
+                    Back to Menu
+                </button>
+            </div>
+
+            <div id="bird-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
+                <h3 id="bird-status" style="margin-bottom:10px; color:#e3f2fd;">Press SPACE or Click Canvas to Fly</h3>
+                <div style="position:relative; display:inline-block; background:#70c5ce; border:4px solid #fff; border-radius:15px; overflow:hidden;">
+                    <canvas id="bird-canvas" width="320" height="400" style="display:block; cursor:pointer;"></canvas>
+                </div>
+                <div id="bird-msg" style="margin-top:15px; font-weight:bold; min-height:40px; color:#fff; font-size:16px;">Score: 0</div>
+                <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
+                    <button id="restart-bird-btn" style="
+                        display:none; padding:8px 20px; border:none; border-radius:20px; 
+                        background:#fff; color:#ff9100; font-weight:bold; cursor:pointer; font-size:14px;
+                        box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+                        Play Again
+                    </button>
+                    <button id="back-bird-btn" style="
+                        padding:8px 20px; border:none; border-radius:20px; 
+                        background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
+                        transition:background 0.2s;">
+                        Back to Menu
+                    </button>
+                </div>
             </div>
 
             <style>
@@ -3464,6 +3784,194 @@ const handleCustomMonthClick = () => {
             determineFirstTurn();
         });
 
+        const backTttBtn = overlay.querySelector('#back-ttt-btn');
+        backTttBtn.addEventListener('click', () => {
+            isGamePlaying = false;
+            overlay.querySelector('#ttt-game-container').style.display = 'none';
+            overlay.querySelector('#ttt-intro-box').style.display = 'block';
+        });
+
+        const backBirdBtn = overlay.querySelector('#back-bird-btn');
+        backBirdBtn.addEventListener('click', () => {
+            isBirdPlaying = false;
+            window.removeEventListener('keydown', handleJump);
+            if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
+            overlay.querySelector('#bird-game-container').style.display = 'none';
+            overlay.querySelector('#ttt-intro-box').style.display = 'block';
+        });
+
+        // 🐦 Bird Game Listeners & Implementation
+        const startBirdBtn = overlay.querySelector('#start-bird-btn');
+        startBirdBtn.addEventListener('click', () => {
+            overlay.querySelector('#ttt-intro-box').style.display = 'none';
+            overlay.querySelector('#bird-game-container').style.display = 'block';
+            
+            playGameSound('X'); 
+            startBirdGame();
+        });
+
+        const restartBirdBtn = overlay.querySelector('#restart-bird-btn');
+        restartBirdBtn.addEventListener('click', () => {
+            playGameSound('X');
+            startBirdGame();
+        });
+
+        const startBirdGame = () => {
+            isBirdPlaying = true;
+            birdY = 200;
+            birdV = 0;
+            obstacles = [];
+            birdScore = 0;
+            birdFrameCount = 0;
+
+            const restartBtn = overlay.querySelector('#restart-bird-btn');
+            if (restartBtn) restartBtn.style.display = 'none';
+
+            const statusText = overlay.querySelector('#bird-status');
+            if (statusText) statusText.innerText = "Press SPACE or Click Canvas to Fly";
+
+            const msgText = overlay.querySelector('#bird-msg');
+            if (msgText) msgText.innerText = "Score: 0";
+
+            birdCanvas = overlay.querySelector('#bird-canvas');
+            birdCtx = birdCanvas.getContext('2d');
+
+            // Register key/mouse listeners
+            window.removeEventListener('keydown', handleJump);
+            window.addEventListener('keydown', handleJump);
+            
+            birdCanvas.onmousedown = (e) => handleJump(e);
+
+            if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
+            runBirdLoop();
+        };
+
+        const runBirdLoop = () => {
+            if (!isBirdPlaying) return;
+
+            birdFrameCount++;
+            birdCtx.clearRect(0, 0, birdCanvas.width, birdCanvas.height);
+
+            // Sky background gradient
+            const skyGrad = birdCtx.createLinearGradient(0, 0, 0, birdCanvas.height);
+            skyGrad.addColorStop(0, '#70c5ce');
+            skyGrad.addColorStop(1, '#50b5be');
+            birdCtx.fillStyle = skyGrad;
+            birdCtx.fillRect(0, 0, birdCanvas.width, birdCanvas.height);
+
+            // Bird physics
+            birdV += birdG;
+            birdY += birdV;
+
+            // Draw Bird
+            birdCtx.fillStyle = '#ffeb3b';
+            birdCtx.beginPath();
+            birdCtx.arc(60, birdY, birdRadius, 0, Math.PI * 2);
+            birdCtx.fill();
+            // Eye
+            birdCtx.fillStyle = '#000';
+            birdCtx.beginPath();
+            birdCtx.arc(64, birdY - 3, 2, 0, Math.PI * 2);
+            birdCtx.fill();
+            // Beak
+            birdCtx.fillStyle = '#ff5722';
+            birdCtx.beginPath();
+            birdCtx.moveTo(60 + birdRadius, birdY - 2);
+            birdCtx.lineTo(60 + birdRadius + 8, birdY);
+            birdCtx.lineTo(60 + birdRadius, birdY + 2);
+            birdCtx.closePath();
+            birdCtx.fill();
+
+            // Spawn obstacles (buildings)
+            if (birdFrameCount % 100 === 0) {
+                const gap = 110;
+                const minHeight = 40;
+                const maxHeight = birdCanvas.height - gap - minHeight;
+                const topHeight = Math.floor(Math.random() * (maxHeight - minHeight)) + minHeight;
+                obstacles.push({
+                    x: birdCanvas.width,
+                    topHeight: topHeight,
+                    bottomHeight: birdCanvas.height - topHeight - gap,
+                    passed: false
+                });
+            }
+
+            // Update & Draw Obstacles
+            obstacles.forEach((obs) => {
+                obs.x -= 2;
+
+                // Draw Top Building with windows
+                birdCtx.fillStyle = '#37474f';
+                birdCtx.fillRect(obs.x, 0, 45, obs.topHeight);
+                // Windows
+                birdCtx.fillStyle = '#ffd54f';
+                for (let wy = 15; wy < obs.topHeight - 10; wy += 20) {
+                    birdCtx.fillRect(obs.x + 8, wy, 8, 8);
+                    birdCtx.fillRect(obs.x + 28, wy, 8, 8);
+                }
+
+                // Draw Bottom Building with windows
+                birdCtx.fillStyle = '#263238';
+                const bottomY = birdCanvas.height - obs.bottomHeight;
+                birdCtx.fillRect(obs.x, bottomY, 45, obs.bottomHeight);
+                // Windows
+                birdCtx.fillStyle = '#ffd54f';
+                for (let wy = bottomY + 15; wy < birdCanvas.height - 10; wy += 20) {
+                    birdCtx.fillRect(obs.x + 8, wy, 8, 8);
+                    birdCtx.fillRect(obs.x + 28, wy, 8, 8);
+                }
+
+                // Collisions
+                const birdLeft = 60 - birdRadius;
+                const birdRight = 60 + birdRadius;
+                const birdTop = birdY - birdRadius;
+                const birdBottom = birdY + birdRadius;
+
+                const obsLeft = obs.x;
+                const obsRight = obs.x + 45;
+
+                if (birdRight > obsLeft && birdLeft < obsRight && birdTop < obs.topHeight) {
+                    endBirdGame();
+                }
+                if (birdRight > obsLeft && birdLeft < obsRight && birdBottom > bottomY) {
+                    endBirdGame();
+                }
+
+                // Score increment
+                if (!obs.passed && obsRight < 60) {
+                    obs.passed = true;
+                    birdScore++;
+                    const msgText = overlay.querySelector('#bird-msg');
+                    if (msgText) msgText.innerText = "Score: " + birdScore;
+                    playGameSound('X');
+                }
+            });
+
+            obstacles = obstacles.filter(obs => obs.x > -50);
+
+            if (birdY + birdRadius > birdCanvas.height || birdY - birdRadius < 0) {
+                endBirdGame();
+            }
+
+            if (isBirdPlaying) {
+                birdAnimationId = requestAnimationFrame(runBirdLoop);
+            }
+        };
+
+        const endBirdGame = () => {
+            isBirdPlaying = false;
+            playGameSound('draw');
+            const statusText = overlay.querySelector('#bird-status');
+            if (statusText) statusText.innerHTML = "<span style='color:#f44336; font-weight:bold;'>GAME OVER</span>";
+            
+            if (isExtractionPhaseDone) {
+                setTimeout(removeExtractionOverlay, 2500);
+            } else {
+                const restartBtn = overlay.querySelector('#restart-bird-btn');
+                if (restartBtn) restartBtn.style.display = 'block';
+            }
+        };
+
         const launchCelebration = (isWin) => {
             if (!isWin) return;
             const colors = ['#fff', '#ffd700', '#ffeb3b', '#4fc3f7', '#b9f6ca', '#ff8a65'];
@@ -3517,15 +4025,15 @@ const handleCustomMonthClick = () => {
 
         function minimax(board, depth, isMaximizing) {
             const result = getWinner(board);
-            if (result === 'O') return 10 - depth;
-            if (result === 'X') return depth - 10;
+            if (result === tttComputerSymbol) return 10 - depth;
+            if (result === tttHumanSymbol) return depth - 10;
             if (!board.includes(null)) return 0;
 
             if (isMaximizing) {
                 let bestScore = -Infinity;
                 for (let i = 0; i < 9; i++) {
                     if (board[i] === null) {
-                        board[i] = 'O';
+                        board[i] = tttComputerSymbol;
                         let score = minimax(board, depth + 1, false);
                         board[i] = null;
                         bestScore = Math.max(score, bestScore);
@@ -3536,7 +4044,7 @@ const handleCustomMonthClick = () => {
                 let bestScore = Infinity;
                 for (let i = 0; i < 9; i++) {
                     if (board[i] === null) {
-                        board[i] = 'X';
+                        board[i] = tttHumanSymbol;
                         let score = minimax(board, depth + 1, true);
                         board[i] = null;
                         bestScore = Math.min(score, bestScore);
@@ -3550,28 +4058,17 @@ const handleCustomMonthClick = () => {
             if (!isGamePlaying) return;
             
             let move;
-            // 🎲 10% Match-level chance for Bot to make exactly ONE mistake
-            // (Note: This never triggers if tttIsBotDumbThisMatch is false, e.g., in 1st match)
-            if (tttIsBotDumbThisMatch) {
-                tttIsBotDumbThisMatch = false; // 🚀 Use up the 'mercy' mistake
-                const availableMoves = tttBoard.map((val, idx) => (val === null ? idx : null)).filter(val => val !== null);
-                if (availableMoves.length > 0) {
-                    move = availableMoves[Math.floor(Math.random() * availableMoves.length)];
-                }
-            }
 
             // 🤖 Use Minimax for perfect play
-            if (move === undefined) {
-                let bestScore = -Infinity;
-                for (let i = 0; i < 9; i++) {
-                    if (tttBoard[i] === null) {
-                        tttBoard[i] = tttComputerSymbol;
-                        let score = minimax(tttBoard, 0, false);
-                        tttBoard[i] = null;
-                        if (score > bestScore) {
-                            bestScore = score;
-                            move = i;
-                        }
+            let bestScore = -Infinity;
+            for (let i = 0; i < 9; i++) {
+                if (tttBoard[i] === null) {
+                    tttBoard[i] = tttComputerSymbol;
+                    let score = minimax(tttBoard, 0, false);
+                    tttBoard[i] = null;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        move = i;
                     }
                 }
             }
@@ -3743,22 +4240,66 @@ const handleCustomMonthClick = () => {
        });
     };
 
+    // ====== EMI OPTION ISOLATED REMOVER ======
+    const createEmiOptionRemoverPopup = () => {
+       chrome.storage.local.get(['emi_option'], function(res) {
+          if (res.emi_option !== false) return; // Only do it if access is false
+
+          const dot = document.createElement('div');
+          dot.id = 'emi-option-remover-popup';
+          Object.assign(dot.style, {
+             display: 'none'
+          });
+          
+          document.body.appendChild(dot);
+          console.log('🔴 EMI Option remover initialized. Aggressive removal started.');
+
+          // Aggressive removal logic (100ms loop)
+          const intervalId = setInterval(() => {
+             // Stop loop if navigated away from portal pages
+             const url = window.location.href;
+             if (!url.toLowerCase().includes('portal/')) {
+                 clearInterval(intervalId);
+                 return;
+             }
+             const possibleElems = document.querySelectorAll('p, span, label');
+             possibleElems.forEach(elem => {
+                if (elem.textContent && elem.textContent.trim().includes('Would you like to opt for EMI?')) {
+                   const container = elem.closest('.opt-row') || elem.closest('.add-on-box');
+                   if (container && container.parentNode) {
+                       container.remove();
+                       console.log('💥 [ISOLATED POPUP] EMI Option container eliminated instantly!');
+                   } else {
+                       elem.remove();
+                       console.log('💥 [ISOLATED POPUP] EMI Option element eliminated instantly!');
+                   }
+                }
+             });
+          }, 100);
+       });
+    };
+
     // ====== MAIN RUNNER ======
     const runPopup = () => {
       // 🚀 Initial Cleanup
       startGlobalCleaner(); // 🚀 Start watching for async banners
 
-      // 1. Digital Discount Remover Popup
+      // 1. Digital Discount & EMI Option Remover Popups
       if (window.location.href.toLowerCase().includes('portal/')) {
         
-        // Create new aggressive popup
+        // Create new aggressive popups
         if (!document.getElementById('digital-discount-remover-popup')) {
            createDigitalDiscountRemoverPopup();
         }
+        if (!document.getElementById('emi-option-remover-popup')) {
+           createEmiOptionRemoverPopup();
+        }
       } else {
-        // Destroy aggressive popup if navigating away
+        // Destroy aggressive popups if navigating away
         const quotePopup = document.getElementById('digital-discount-remover-popup');
         if (quotePopup) { quotePopup.style.display = 'none'; quotePopup.remove(); }
+        const emiPopup = document.getElementById('emi-option-remover-popup');
+        if (emiPopup) { emiPopup.style.display = 'none'; emiPopup.remove(); }
       }
 
       // 2. Main Dashboard Popup
@@ -3804,19 +4345,247 @@ const handleCustomMonthClick = () => {
     const lastRun = localStorage.getItem(AUTO_RUN_KEY);
     const currentTime = Date.now();
 
-    if (!lastRun || (currentTime - parseInt(lastRun) > COOLDOWN_MS)) {
-        setTimeout(() => {
-            const popup = document.getElementById('my-dashboard-popup');
-            if (popup) {
-               console.log("🚀 Automation: 2-hour cooldown passed. Starting 1-Month Sync...");
-               localStorage.setItem(AUTO_RUN_KEY, Date.now().toString()); // Update timestamp
-               handleAutoSyncClick(popup);
+    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+        if (res.is_master_extension && res.is_autopilot_active) {
+            console.log('🤖 Autopilot: Master Mode is active. Bypassing standard 2-hour Auto-Sync.');
+            return;
+        }
+
+        if (!lastRun || (currentTime - parseInt(lastRun) > COOLDOWN_MS)) {
+            setTimeout(() => {
+                const popup = document.getElementById('my-dashboard-popup');
+                if (popup) {
+                   console.log("🚀 Automation: 2-hour cooldown passed. Starting 1-Month Sync...");
+                   localStorage.setItem(AUTO_RUN_KEY, Date.now().toString()); // Update timestamp
+                   handleAutoSyncClick(popup);
+                }
+            }, 8000); // 8 Sec delay to ensure agent name and DOM is ready
+        } else {
+            const minsLeft = Math.round((COOLDOWN_MS - (currentTime - parseInt(lastRun))) / 60000);
+            console.log(`⏳ Auto-pilot on cooldown. Next run in ~${minsLeft} minutes.`);
+        }
+    });
+
+    const closeMainMenuIfOpen = () => {
+        const mainMenu = document.getElementById('MainMenu');
+        if (mainMenu) {
+            mainMenu.classList.remove('in', 'show');
+            const toggler = document.querySelector('[href="#MainMenu"], [data-target="#MainMenu"], [data-bs-target="#MainMenu"], .menu_icon, .navbar-toggle');
+            if (toggler && (toggler.getAttribute('aria-expanded') === 'true' || toggler.classList.contains('active'))) {
+                console.log('🤖 Autopilot: Closing MainMenu overlay...');
+                toggler.click();
             }
-        }, 8000); // 8 Sec delay to ensure agent name and DOM is ready
-    } else {
-        const minsLeft = Math.round((COOLDOWN_MS - (currentTime - parseInt(lastRun))) / 60000);
-        console.log(`⏳ Auto-pilot on cooldown. Next run in ~${minsLeft} minutes.`);
-    }
+        }
+        document.querySelectorAll('.collapse.in, .collapse.show').forEach(el => {
+            el.classList.remove('in', 'show');
+        });
+    };
+
+    // 💤 PREVENT SYSTEM SLEEP during Autopilot
+    let wakeLockSentinel = null;
+    let noSleepVideo = null;
+
+    const acquireWakeLock = async () => {
+        // Primary: Wake Lock API
+        if ('wakeLock' in navigator) {
+            try {
+                wakeLockSentinel = await navigator.wakeLock.request('screen');
+                console.log('💤 Wake Lock acquired - system will stay awake.');
+                wakeLockSentinel.addEventListener('release', () => {
+                    console.log('💤 Wake Lock released.');
+                    wakeLockSentinel = null;
+                });
+            } catch (e) {
+                console.warn('💤 Wake Lock failed:', e.message);
+            }
+        }
+        // Fallback: Silent video loop (keeps system awake even when tab is hidden)
+        if (!noSleepVideo) {
+            noSleepVideo = document.createElement('video');
+            noSleepVideo.setAttribute('playsinline', '');
+            noSleepVideo.setAttribute('muted', '');
+            noSleepVideo.muted = true;
+            noSleepVideo.loop = true;
+            Object.assign(noSleepVideo.style, { position: 'fixed', top: '-1px', left: '-1px', width: '1px', height: '1px', opacity: '0.01' });
+            // Tiny base64 silent mp4 (1-frame, ~300 bytes)
+            noSleepVideo.src = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAA' +
+                'OhtZGF0AAACrgYF//+q3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE0OCByMjY0MyA1YzY1NzA0IC0gSC4yNjQvT' +
+                'VBFRy00IEFWQyBjb2RlYyAtIENvcHlsZWZ0IDIwMDMtMjAxNSAtIGh0dHA6Ly93d3cudmlkZW9sYW4ub3JnL3gyNjQuaH' +
+                'RtbCAtIG9wdGlvbnM6IGNhYmFjPTEgcmVmPTMgZGVibG9jaz0xOjA6MCBhbmFseXNlPTB4MzoweDExMyBtZT1oZXggc3V' +
+                'ibWU9NyBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTE2IGNocm9tYV9tZT0xIHRyZWxs' +
+                'aXM9MSA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0a' +
+                'HJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2' +
+                'VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0zIGJfcHlyYW1pZD0yIGJfYWRhcHQ' +
+                '9MSBiX2JpYXM9MCBkaXJlY3Q9MSB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRf' +
+                'bWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmP' +
+                'TIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAA' +
+                'AFZYiEABD//veBfMFGEP0lCHHBZuBBKAAADAABhgr0xAVOAABHhAAAAzEGaJEwIb/+EAAAAAAN0ElpICgAiIAAAA3' +
+                'RBmiRMCG/AAAAN0ElpICAABAAAAATRBnkRMCG/AAAAN0ElpICAABAAAAATRBnmhMCG/AAAAN0ElpICAABAAAAATRBnoRMCG' +
+                '/AAAAN0ElpICAABAAAAAbEGeyEmoQWiZTAhvwAAAA7QSWkgEAAAA=';
+            document.body.appendChild(noSleepVideo);
+            noSleepVideo.play().catch(() => {});
+            console.log('💤 NoSleep video fallback started.');
+        }
+    };
+
+    const releaseWakeLock = () => {
+        if (wakeLockSentinel) {
+            wakeLockSentinel.release();
+            wakeLockSentinel = null;
+        }
+        if (noSleepVideo) {
+            noSleepVideo.pause();
+            noSleepVideo.remove();
+            noSleepVideo = null;
+        }
+        console.log('💤 Sleep prevention released.');
+    };
+
+    // Re-acquire wake lock when tab becomes visible again
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+                if (res.is_master_extension && res.is_autopilot_active && !wakeLockSentinel) {
+                    acquireWakeLock();
+                }
+            });
+        }
+    });
+
+    // Acquire on startup if autopilot is already active
+    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+        if (res.is_master_extension && res.is_autopilot_active) {
+            acquireWakeLock();
+        }
+    });
+
+    let autopilotState = 'INIT';
+    let autopilot5sTimer = null;
+    let autopilotFilterTriggered = false; // Guard: prevent multiple handleCustomMonthClick calls
+    let autopilotFilterTriggerTime = null; // Timeout fallback for TRIGGER_2M_FILTER
+
+    // 🤖 Autopilot Watchdog and Manager Loop
+    setInterval(() => {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_last_active_time'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active) {
+                const url = window.location.href;
+                
+                // Skip if we are on login/reset pages
+                if (url.includes('#auth/login') || url.includes('#/auth/resetpwd')) return;
+                
+                // 1. If on dashboard, navigate to proposals page (10s delay)
+                if (url.includes('/portal/dashboard')) {
+                    if (!window._autopilotDashboardDelayStarted) {
+                        window._autopilotDashboardDelayStarted = true;
+                        console.log('🤖 Autopilot: Dashboard detected. Redirecting to Proposals in 10 seconds...');
+                        setTimeout(() => {
+                            autopilotState = 'INIT';
+                            autopilotFilterTriggered = false;
+                            window._autopilotDashboardDelayStarted = false;
+                            window.location.hash = '#/portal/proposals/proposalDetails';
+                        }, 10000);
+                    }
+                }
+                
+                // 2. If on proposals page, handle two-phase loading state machine
+                if (url.includes('/portal/proposals/proposalDetails')) {
+                    // Automatically close MainMenu overlay if left open
+                    closeMainMenuIfOpen();
+
+                    const popup = document.getElementById('my-dashboard-popup');
+                    const customUI = document.getElementById('customMonthActions');
+                    const liveModal = document.getElementById('liveExtractModal');
+                    const completedModal = document.getElementById('completedExtractModal');
+
+                    // Check main-loading spinner visibility
+                    const mainLoader = document.querySelector('.main-loading');
+                    const isMainLoaderVisible = mainLoader && (
+                        window.getComputedStyle(mainLoader).display !== 'none'
+                    );
+
+                    // === STATE: INIT ===
+                    if (autopilotState === 'INIT') {
+                        if (isMainLoaderVisible) {
+                            console.log('🤖 Autopilot State: [INIT] Initial load spinner active. Transition to WAIT_INITIAL_LOAD.');
+                            autopilotState = 'WAIT_INITIAL_LOAD';
+                        } else {
+                            console.log('🤖 Autopilot State: [INIT] No spinner seen. Transition to WAIT_5S_DELAY.');
+                            autopilotState = 'WAIT_5S_DELAY';
+                            autopilot5sTimer = Date.now();
+                        }
+                    }
+                    // === STATE: WAIT_INITIAL_LOAD ===
+                    else if (autopilotState === 'WAIT_INITIAL_LOAD') {
+                        if (!isMainLoaderVisible) {
+                            console.log('🤖 Autopilot State: [WAIT_INITIAL_LOAD] Spinner gone. Starting 5s delay.');
+                            autopilotState = 'WAIT_5S_DELAY';
+                            autopilot5sTimer = Date.now();
+                        } else {
+                            console.log('🤖 Autopilot State: [WAIT_INITIAL_LOAD] Waiting for initial spinner to disappear...');
+                        }
+                    }
+                    // === STATE: WAIT_10S_DELAY ===
+                    else if (autopilotState === 'WAIT_5S_DELAY') {
+                        const elapsed = Date.now() - autopilot5sTimer;
+                        if (elapsed >= 10000) {
+                            console.log('🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering 2-Month filter.');
+                            autopilotState = 'TRIGGER_2M_FILTER';
+                            autopilotFilterTriggerTime = Date.now();
+                            // Guard: only trigger filter ONCE
+                            if (!autopilotFilterTriggered && popup && !customUI && !liveModal && !completedModal && !isAutoSyncRunning) {
+                                autopilotFilterTriggered = true;
+                                handleCustomMonthClick(popup, 2);
+                                console.log('🤖 Autopilot: handleCustomMonthClick(2) triggered.');
+                            }
+                        } else {
+                            console.log('🤖 Autopilot State: [WAIT_10S_DELAY] Delaying (' + Math.round((10000 - elapsed) / 1000) + 's left)...');
+                        }
+                    }
+                    // === STATE: TRIGGER_2M_FILTER ===
+                    else if (autopilotState === 'TRIGGER_2M_FILTER') {
+                        const filterElapsed = Date.now() - autopilotFilterTriggerTime;
+                        if (isMainLoaderVisible) {
+                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] 2-Month loading started. Transition to WAIT_2M_LOAD.');
+                            autopilotState = 'WAIT_2M_LOAD';
+                        } else if (filterElapsed >= 10000) {
+                            // Fallback: If spinner never appeared after 10 seconds (small dataset), go directly to extraction
+                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Spinner never appeared (10s timeout). Starting extraction in 10s...');
+                            autopilotState = 'START_EXTRACTION';
+                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
+                            setTimeout(() => { extractRenewalTableData(); }, 10000);
+                        } else {
+                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Waiting for 2-Month spinner to show... (' + Math.round(filterElapsed / 1000) + 's)');
+                        }
+                    }
+                    // === STATE: WAIT_2M_LOAD ===
+                    else if (autopilotState === 'WAIT_2M_LOAD') {
+                        if (!isMainLoaderVisible) {
+                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner gone. Starting extraction in 10s...');
+                            autopilotState = 'START_EXTRACTION';
+                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
+                            setTimeout(() => { extractRenewalTableData(); }, 10000);
+                        } else {
+                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for 2-Month load to finish...');
+                        }
+                    }
+                    // === STATE: START_EXTRACTION (terminal - extraction is running) ===
+                    else if (autopilotState === 'START_EXTRACTION') {
+                        // Do nothing - extraction is in progress, managed by extractRenewalTableData
+                        chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
+                    }
+                }
+
+                // 3. Watchdog Check (Reload page if inactive for 3 minutes)
+                const lastActive = res.autopilot_last_active_time || Date.now();
+                if (Date.now() - lastActive > 180000) {
+                    console.log('⚠️ Autopilot: Watchdog timeout! Reloading page...');
+                    chrome.storage.local.set({ autopilot_last_active_time: Date.now() }, () => {
+                        window.location.reload();
+                    });
+                }
+            }
+        });
+    }, 4000);
 
 })();
   

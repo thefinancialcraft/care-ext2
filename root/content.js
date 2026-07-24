@@ -1,13 +1,31 @@
 (function() {
   // 🛡️ [VISIBILITY CONTROL] Hide unauthorized menu items
   function applyVisibilityPermissions() {
-    chrome.storage.local.get(['profile_visible', 'renewal_visible', 'digital_discount'], function(res) {
+    chrome.storage.local.get(['profile_visible', 'renewal_visible', 'digital_discount', 'emi_option'], function(res) {
       // Default to true if not set
       const profileVisible = res.profile_visible !== false; 
       const renewalVisible = res.renewal_visible !== false;
       const digitalDiscount = res.digital_discount !== false;
+      const emiOption = res.emi_option !== false;
 
-      console.log('🛡️ [VISIBILITY] Profile:', profileVisible, 'Renewal:', renewalVisible, 'Digital Discount:', digitalDiscount);
+      console.log('🛡️ [VISIBILITY] Profile:', profileVisible, 'Renewal:', renewalVisible, 'Digital Discount:', digitalDiscount, 'EMI Option:', emiOption);
+
+      // 🛡️ [VISIBILITY CONTROL] Delete EMI Option
+      if (emiOption === false && window.location.href.toLowerCase().includes('portal/')) {
+        const possibleElems = document.querySelectorAll('p, span, label');
+        possibleElems.forEach(elem => {
+          if (elem.textContent && elem.textContent.trim().includes('Would you like to opt for EMI?')) {
+            const container = elem.closest('.opt-row') || elem.closest('.add-on-box');
+            if (container && container.parentNode) {
+                console.log('🚫 [VISIBILITY] Deleting EMI Option container');
+                container.remove();
+            } else {
+                console.log('🚫 [VISIBILITY] Deleting EMI Option element');
+                elem.remove();
+            }
+          }
+        });
+      }
 
       // 🛡️ [VISIBILITY CONTROL] Delete Digital Discount
       if (digitalDiscount === false && window.location.href.toLowerCase().includes('portal/')) {
@@ -128,6 +146,53 @@
   applyVisibilityPermissions();
   setInterval(applyVisibilityPermissions, 2000);
 
+  // 🧹 Force sidebar CLOSED on Proposals page using CSS override (Angular-proof)
+  var sidebarCSSInjected = false;
+
+  setInterval(function() {
+    var url = window.location.href.toLowerCase();
+    if (url.includes('proposals/proposaldetails')) {
+      // Inject CSS that completely kills sidebar toggle effect (only once)
+      if (!sidebarCSSInjected) {
+        sidebarCSSInjected = true;
+        var style = document.createElement('style');
+        style.id = 'autopilot-sidebar-kill';
+        style.textContent = '\
+          #sidebarwrapper,\
+          #sidebarwrapper.toggled {\
+            display: none !important;\
+            visibility: hidden !important;\
+            width: 0 !important;\
+            height: 0 !important;\
+            overflow: hidden !important;\
+            position: fixed !important;\
+            left: -9999px !important;\
+            pointer-events: none !important;\
+            z-index: -1 !important;\
+          }\
+          #sideBackdrop,\
+          #sideBackdrop.backdrop1 {\
+            display: none !important;\
+            visibility: hidden !important;\
+            pointer-events: none !important;\
+          }\
+          #sidebar-wrapper,\
+          #MainMenu {\
+            display: none !important;\
+            visibility: hidden !important;\
+          }\
+        ';
+        document.head.appendChild(style);
+        console.log('🧹 Injected CSS: Sidebar forcefully hidden on Proposals page.');
+      }
+      // Also remove MainMenu from DOM as backup
+      var mainMenu = document.getElementById('MainMenu');
+      if (mainMenu) { mainMenu.remove(); }
+      var mobViews = document.querySelectorAll('.insurance_mpbile_view');
+      mobViews.forEach(function(mv) { mv.remove(); });
+    }
+  }, 500);
+
   // 🚀 INSTANT AUTO-DETECT FOR DIGITAL DISCOUNT (MutationObserver)
   chrome.storage.local.get(['digital_discount'], function(res) {
     const digitalDiscount = res.digital_discount !== false;
@@ -156,6 +221,31 @@
                   } else {
                       elementToRemove.remove();
                   }
+              }
+            }
+          });
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
+  });
+
+  // 🚀 INSTANT AUTO-DETECT FOR EMI OPTION (MutationObserver)
+  chrome.storage.local.get(['emi_option'], function(res) {
+    const emiOption = res.emi_option !== false;
+    if (emiOption === false) {
+      const observer = new MutationObserver(() => {
+        if (window.location.href.toLowerCase().includes('portal/')) {
+          const possibleElems = document.querySelectorAll('p, span, label');
+          possibleElems.forEach(elem => {
+            if (elem.textContent && elem.textContent.trim().includes('Would you like to opt for EMI?')) {
+              const container = elem.closest('.opt-row') || elem.closest('.add-on-box');
+              if (container && container.parentNode) {
+                  console.log('🚫 [INSTANT AUTO-DETECT] Deleting EMI Option container on redirect!');
+                  container.remove();
+              } else {
+                  console.log('🚫 [INSTANT AUTO-DETECT] Deleting EMI Option element on redirect!');
+                  elem.remove();
               }
             }
           });

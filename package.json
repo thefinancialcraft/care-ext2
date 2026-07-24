@@ -1,0 +1,23 @@
+{
+  "name": "care-ext2",
+  "version": "1.0.0",
+  "main": "ob.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thefinancialcraft/care-ext2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/thefinancialcraft/care-ext2/issues"
+  },
+  "homepage": "https://github.com/thefinancialcraft/care-ext2#readme",
+  "description": "",
+  "dependencies": {
+    "javascript-obfuscator": "^5.5.0"
+  }
+}

@@ -70,6 +70,23 @@ function syncStateToStorage() {
   });
 }
 
+function triggerSheetsSync() {
+  console.log('🔄 Triggering Supabase Edge Function to sync all data to Google Sheets...');
+  fetch('https://qfbeskgvxjwqccaraulv.supabase.co/functions/v1/sync-to-sheets', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    console.log('✅ Supabase Edge Function Sync Complete:', data);
+  })
+  .catch(err => {
+    console.error('❌ Failed to trigger Supabase Edge Function Sync:', err);
+  });
+}
+
 function startUploadLoop() {
   if (uploadState.isLoopRunning && !uploadState.isPaused && !uploadState.isError) {
     return;
@@ -82,6 +99,13 @@ function startUploadLoop() {
       uploaded: uploadState.uploaded
     });
     syncStateToStorage();
+
+    chrome.storage.local.get(['useGoogleSheet'], (res) => {
+      if (!res.useGoogleSheet) {
+        triggerSheetsSync();
+      }
+    });
+
     return;
   }
 
@@ -102,49 +126,187 @@ function startUploadLoop() {
   }
 
   const startTime = Date.now();
-  const encodedChunk = 'data=' + encodeURIComponent(JSON.stringify(chunk));
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 45000);
+  chrome.storage.local.get(['useGoogleSheet'], (res) => {
+    const useGoogleSheet = res.useGoogleSheet || false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-  fetch('https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: encodedChunk,
-    signal: controller.signal
-  })
-    .then(response => response.text())
-    .then(text => {
-      clearTimeout(timeoutId);
-      let result;
-      try { result = JSON.parse(text); } catch (e) { throw new Error('Invalid Server Response'); }
+    if (!useGoogleSheet) {
+      const parseNumeric = (val) => {
+        if (val === undefined || val === null || val === '') return null;
+        const clean = String(val).replace(/,/g, '').trim();
+        const num = parseFloat(clean);
+        return isNaN(num) ? null : num;
+      };
 
-      if (result.status === 'success') {
-        const timeTaken = Date.now() - startTime;
+      const parseIntValue = (val) => {
+        if (val === undefined || val === null || val === '') return null;
+        const clean = String(val).replace(/,/g, '').trim();
+        const num = parseInt(clean, 10);
+        return isNaN(num) ? null : num;
+      };
+
+      const formattedRows = chunk.map(row => {
+        const normalized = {};
+        for (let key in row) {
+          if (key && key.trim()) {
+            const cleanKey = key.trim().toUpperCase().replace(/\.+$/, '');
+            normalized[cleanKey] = row[key];
+          }
+        }
+
+        return {
+          proposal_no: normalized['PROPOSAL_NO']?.toString().trim() || null,
+          customer_name: normalized['CUSTOMER_NAME']?.toString().trim() || null,
+          payment_amount: parseNumeric(normalized['PAYMENT_AMOUNT']),
+          gwp: parseNumeric(normalized['GWP']),
+          login_date: normalized['LOGIN_DATE']?.toString().trim() || null,
+          proposal_status: normalized['PROPOSAL_STATUS']?.toString().trim() || null,
+          policy_no: normalized['POLICY_NO']?.toString().trim() || null,
+          policy_start_date: normalized['POLICY_START_DATE']?.toString().trim() || null,
+          no_of_lives: parseIntValue(normalized['NO._OF_LIVES']) || parseIntValue(normalized['NO_OF_LIVES']),
+          business_type: normalized['BUSINESS_TYPE']?.toString().trim() || null,
+          plan: normalized['PLAN']?.toString().trim() || null,
+          agent_name: normalized['AGENT_NAME']?.toString().trim() || null,
+          updated_at: new Date().toISOString()
+        };
+      }).filter(r => r.proposal_no);
+
+      const uniqueRowsMap = new Map();
+      formattedRows.forEach(row => {
+        uniqueRowsMap.set(row.proposal_no, row);
+      });
+      const uniqueFormattedRows = Array.from(uniqueRowsMap.values());
+
+      if (uniqueFormattedRows.length === 0) {
+        clearTimeout(timeoutId);
         uploadState.uploaded += chunk.length;
         uploadState.currentIndex += uploadState.chunkSize;
+        uploadState.isLoopRunning = false;
+        startUploadLoop();
+        return;
+      }
 
-        const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
+      const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_data?on_conflict=proposal_no';
+      const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
 
-        sendUpdateToContent('UPLOAD_PROGRESS', {
-          progressPercent: percent,
-          uploadedCount: uploadState.uploaded,
-          totalCount: uploadState.total,
-          currentLead: chunk[0]
+      fetch(SUPABASE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify(uniqueFormattedRows),
+        signal: controller.signal
+      })
+        .then(response => {
+          clearTimeout(timeoutId);
+          if (!response.ok) {
+            return response.text().then(text => {
+              throw new Error(`Supabase Error: ${response.status} - ${text}`);
+            });
+          }
+          uploadState.uploaded += chunk.length;
+          uploadState.currentIndex += uploadState.chunkSize;
+          const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
+
+          const lastBatchTime = Date.now() - startTime;
+          const duration = lastBatchTime / 1000;
+          if (!uploadState.chunkHistory) uploadState.chunkHistory = [];
+          uploadState.chunkHistory.push(duration);
+          if (uploadState.chunkHistory.length > 10) uploadState.chunkHistory.shift();
+
+          const avgChunkTime = uploadState.chunkHistory.reduce((a, b) => a + b, 0) / uploadState.chunkHistory.length;
+          const remainingChunks = Math.ceil((uploadState.total - uploadState.uploaded) / uploadState.chunkSize);
+          const estSecondsLeft = Math.round(remainingChunks * avgChunkTime);
+          const totalChunks = Math.ceil(uploadState.total / uploadState.chunkSize);
+          const totalEstSeconds = Math.round(totalChunks * avgChunkTime);
+
+          sendUpdateToContent('UPLOAD_PROGRESS', {
+            progressPercent: percent,
+            uploadedCount: uploadState.uploaded,
+            totalCount: uploadState.total,
+            estSecondsLeft: estSecondsLeft,
+            totalEstSeconds: totalEstSeconds,
+            currentLead: chunk[0],
+            avgChunkTime: avgChunkTime,
+            lastBatchTime: lastBatchTime,
+            chunkHistory: uploadState.chunkHistory,
+            chunkSize: uploadState.chunkSize
+          });
+
+          syncStateToStorage();
+          uploadState.isLoopRunning = false;
+          setTimeout(startUploadLoop, 1000);
+        })
+        .catch(err => {
+          clearTimeout(timeoutId);
+          uploadState.isLoopRunning = false;
+          handleUploadError(err.message);
         });
 
-        syncStateToStorage();
-        uploadState.isLoopRunning = false;
-        setTimeout(startUploadLoop, 1000);
-      } else {
-        throw new Error(result.message || 'Server Logic Error');
-      }
-    })
-    .catch(err => {
-      clearTimeout(timeoutId);
-      uploadState.isLoopRunning = false;
-      handleUploadError(err.message);
-    });
+    } else {
+      const encodedChunk = 'data=' + encodeURIComponent(JSON.stringify(chunk));
+
+      fetch('https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: encodedChunk,
+        signal: controller.signal
+      })
+        .then(response => response.text())
+        .then(text => {
+          clearTimeout(timeoutId);
+          let result;
+          try { result = JSON.parse(text); } catch (e) { throw new Error('Invalid Server Response'); }
+
+          if (result.status === 'success') {
+            uploadState.uploaded += chunk.length;
+            uploadState.currentIndex += uploadState.chunkSize;
+            const percent = Math.min(Math.round((uploadState.uploaded / uploadState.total) * 100), 100);
+
+            const lastBatchTime = Date.now() - startTime;
+            const duration = lastBatchTime / 1000;
+            if (!uploadState.chunkHistory) uploadState.chunkHistory = [];
+            uploadState.chunkHistory.push(duration);
+            if (uploadState.chunkHistory.length > 10) uploadState.chunkHistory.shift();
+
+            const avgChunkTime = uploadState.chunkHistory.reduce((a, b) => a + b, 0) / uploadState.chunkHistory.length;
+            const remainingChunks = Math.ceil((uploadState.total - uploadState.uploaded) / uploadState.chunkSize);
+            const estSecondsLeft = Math.round(remainingChunks * avgChunkTime);
+            const totalChunks = Math.ceil(uploadState.total / uploadState.chunkSize);
+            const totalEstSeconds = Math.round(totalChunks * avgChunkTime);
+
+            sendUpdateToContent('UPLOAD_PROGRESS', {
+              progressPercent: percent,
+              uploadedCount: uploadState.uploaded,
+              totalCount: uploadState.total,
+              estSecondsLeft: estSecondsLeft,
+              totalEstSeconds: totalEstSeconds,
+              currentLead: chunk[0],
+              avgChunkTime: avgChunkTime,
+              lastBatchTime: lastBatchTime,
+              chunkHistory: uploadState.chunkHistory,
+              chunkSize: uploadState.chunkSize
+            });
+
+            syncStateToStorage();
+            uploadState.isLoopRunning = false;
+            setTimeout(startUploadLoop, 1000);
+          } else {
+            throw new Error(result.message || 'Server Logic Error');
+          }
+        })
+        .catch(err => {
+          clearTimeout(timeoutId);
+          uploadState.isLoopRunning = false;
+          handleUploadError(err.message);
+        });
+    }
+  });
 }
 
 function handleUploadError(errMsg) {
@@ -289,6 +451,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+  else if (message.type === 'SET_MASTER_MODE') {
+    const isMaster = message.payload.isMaster;
+    if (isMaster) {
+      chrome.storage.local.get(['favExtId'], function(res) {
+        const extId = res.favExtId || '';
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=forlogin&extId=' + extId;
+        fetch(APPS_SCRIPT_URL)
+          .then(r => r.json())
+          .then(agents => {
+            chrome.storage.local.set({
+              is_master_extension: true,
+              is_autopilot_active: true,
+              autopilot_paused: false,
+              autopilot_index: 0,
+              autopilot_next_login_time: 0,
+              autopilot_agents: agents
+            }, function() {
+              chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+                if (tabs[0] && tabs[0].url && tabs[0].url.includes('faveo.careinsurance.com')) {
+                  chrome.tabs.update(tabs[0].id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
+                }
+              });
+              sendResponse({ success: true });
+            });
+          })
+          .catch(err => {
+            sendResponse({ success: false, error: err.message });
+          });
+      });
+    } else {
+      chrome.storage.local.set({
+        is_master_extension: false,
+        is_autopilot_active: false,
+        autopilot_paused: false
+      }, function() {
+        chrome.storage.local.remove(['autopilot_agents', 'autopilot_index', 'autopilot_next_login_time'], function() {
+          sendResponse({ success: true });
+        });
+      });
+    }
+    return true;
+  }
 });
 
 let unlockedExtensions = false;
@@ -342,4 +546,29 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     chrome.tabs.update(tabId, { url: chrome.runtime.getURL('auth.html') });
   }
 });
+
+// 🤖 Autopilot Tab Redirector Loop
+setInterval(() => {
+  chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
+    if (res.is_master_extension && res.is_autopilot_active) {
+      chrome.tabs.query({}, (tabs) => {
+        const faveoTab = tabs.find(tab => tab.url && tab.url.includes('faveo.careinsurance.com'));
+        if (!faveoTab) {
+          chrome.tabs.query({ active: true, currentWindow: true }, (activeTabs) => {
+            if (activeTabs[0] && activeTabs[0].url && !activeTabs[0].url.startsWith('chrome://')) {
+              chrome.tabs.update(activeTabs[0].id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
+            } else {
+              chrome.tabs.create({ url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
+            }
+          });
+        } else {
+          const url = faveoTab.url.toLowerCase();
+          if (!url.includes('newfaveo/#auth/login') && !url.includes('newfaveo/#/portal')) {
+            chrome.tabs.update(faveoTab.id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
+          }
+        }
+      });
+    }
+  });
+}, 8000);
 

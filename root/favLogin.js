@@ -85,13 +85,125 @@
         list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Verifying Authorization...</div>';
         container.appendChild(list);
 
+        var handleAutopilotError = function() {
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(res) {
+                if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                    var nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                    chrome.storage.local.set({
+                        autopilot_index: nextIndex,
+                        autopilot_next_login_time: Date.now() + 5000 // Start next in 5s
+                    }, function() {
+                        console.log('🤖 Autopilot Error handler: Reloading page to try next agent...');
+                        window.location.reload();
+                    });
+                }
+            });
+        };
+
+        var runAutopilotUI = function(agents, nextLoginTime, currentIndex) {
+            list.innerHTML = '';
+            var autoCard = document.createElement('div');
+            autoCard.style.cssText = 'padding:15px; text-align:center; background:rgba(255,255,255,0.05); border-radius:12px; border:1px solid rgba(255,255,255,0.1); margin:10px; display:flex; flex-direction:column; gap:10px;';
+            
+            var agent = agents[currentIndex];
+            if (!agent) {
+                chrome.storage.local.set({ autopilot_index: 0 }, function() {
+                    onAuthorized();
+                });
+                return;
+            }
+            var aName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Unknown';
+            var aId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '--';
+
+            autoCard.innerHTML = '\
+                <div style="font-size:11px; color:#ff9800; font-weight:700; text-transform:uppercase; letter-spacing:1.5px;">Autopilot Active</div>\
+                <div style="font-size:14px; font-weight:600; color:#fff; margin-top:5px;">Next: ' + aName + '</div>\
+                <div style="font-size:10px; color:rgba(255,255,255,0.4);">ID: ' + aId + '</div>\
+                <div style="font-size:26px; font-weight:700; color:#4caf50; margin:10px 0;" id="autoCountdown">--s</div>\
+            ';
+            
+            var pauseBtn = document.createElement('button');
+            pauseBtn.className = 'agent-card';
+            pauseBtn.style.cssText = 'background:#ff9800; color:#fff; border:none; justify-content:center; height:36px; margin:0;';
+            pauseBtn.innerHTML = '<div style="font-weight:700; font-size:12px;">PAUSE AUTOPILOT</div>';
+            autoCard.appendChild(pauseBtn);
+            list.appendChild(autoCard);
+
+            var updateTimer = function() {
+                var timeLeft = Math.max(0, Math.ceil((nextLoginTime - Date.now()) / 1000));
+                var cdEl = document.getElementById('autoCountdown');
+                if (cdEl) cdEl.innerText = timeLeft + 's';
+                
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    autoCard.innerHTML = '<div style="color:#4caf50; font-size:13px; font-weight:bold; padding:15px; text-align:center;"><i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite; margin: 0 auto 10px auto; font-size:20px;"></i>Starting Login...</div>';
+                    startLoginCycle(agent, aName, aId, list);
+                }
+            };
+
+            var timerInterval = setInterval(updateTimer, 500);
+            updateTimer();
+
+            pauseBtn.onclick = function() {
+                var pin = prompt('🔒 Enter Security PIN to Pause Autopilot:');
+                if (pin === '1509') {
+                    clearInterval(timerInterval);
+                    chrome.storage.local.set({ autopilot_paused: true }, function() {
+                        onAuthorized();
+                    });
+                } else {
+                    alert('❌ Incorrect PIN. Autopilot will continue.');
+                }
+            };
+        };
+
+        var runAutopilotPausedUI = function(agents, currentIndex) {
+            list.innerHTML = '';
+            var autoCard = document.createElement('div');
+            autoCard.style.cssText = 'padding:15px; text-align:center; background:rgba(255,255,255,0.05); border-radius:12px; border:1px solid rgba(255,255,255,0.1); margin:10px; display:flex; flex-direction:column; gap:10px;';
+            
+            var agent = agents[currentIndex];
+            var aName = agent ? (getKey(agent, 'agent name') || getKey(agent, 'agent_name')) : 'Unknown';
+
+            autoCard.innerHTML = '\
+                <div style="font-size:11px; color:#f44336; font-weight:700; text-transform:uppercase; letter-spacing:1.5px;">Autopilot Paused</div>\
+                <div style="font-size:14px; font-weight:600; color:#fff; margin-top:5px;">Next: ' + aName + '</div>\
+                <div style="font-size:20px; font-weight:700; color:#f44336; margin:10px 0;">PAUSED</div>\
+            ';
+            
+            var resumeBtn = document.createElement('button');
+            resumeBtn.className = 'agent-card';
+            resumeBtn.style.cssText = 'background:#4caf50; color:#fff; border:none; justify-content:center; height:36px; margin:0;';
+            resumeBtn.innerHTML = '<div style="font-weight:700; font-size:12px;">RESUME AUTOPILOT</div>';
+            autoCard.appendChild(resumeBtn);
+            list.appendChild(autoCard);
+
+            resumeBtn.onclick = function() {
+                var nextLogin = Date.now() + 5000;
+                chrome.storage.local.set({ autopilot_paused: false, autopilot_next_login_time: nextLogin }, function() {
+                    onAuthorized();
+                });
+            };
+        };
+
         var onAuthorized = function() {
             // 🎯 AUTHORIZED ACTIONS
             header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-check" style="color:#4caf50; font-size:18px;"></i><h3 class="fav-login-title">Select Agent Profile</h3></div>';
             
-            chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
-                if (response && response.success) renderAgents(response.agents);
-                else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_next_login_time', 'autopilot_agents'], function(res) {
+                if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                    if (res.autopilot_paused) {
+                        runAutopilotPausedUI(res.autopilot_agents, res.autopilot_index);
+                    } else {
+                        var nextLogin = res.autopilot_next_login_time || 0;
+                        runAutopilotUI(res.autopilot_agents, nextLogin, res.autopilot_index);
+                    }
+                } else {
+                    chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
+                        if (response && response.success) renderAgents(response.agents);
+                        else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
+                    });
+                }
             });
         };
 
@@ -162,10 +274,18 @@
         var showLoginView = function(extId) {
             header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-lock" style="color:#ffb300; font-size:18px;"></i><h3 class="fav-login-title">Extension Login</h3></div>';
             
-            chrome.storage.local.get(['favUserProfile', 'is_admin'], function(res) {
+            chrome.storage.local.get(['favUserProfile', 'is_admin', 'is_master_extension', 'is_autopilot_active'], function(res) {
                 var profile = res.favUserProfile;
                 
                 if (profile && profile.email) {
+                    // 🤖 Autopilot Auto-Login for User Card
+                    if (res.is_master_extension && res.is_autopilot_active) {
+                        console.log('🤖 Autopilot: Automatically triggering Extension User login...');
+                        setTimeout(function() {
+                            var uBtn = document.getElementById('btnUserLogin');
+                            if (uBtn) uBtn.click();
+                        }, 800);
+                    }
                     // 👤 SHOW USER CARD
                     list.innerHTML = '\
                         <div style="display:flex; flex-direction:column; gap:10px; padding:10px;">\
@@ -221,6 +341,7 @@
                                     profile_visible: response.profile_visible,
                                     renewal_visible: response.renewal_visible,
                                     digital_discount: response.digital_discount,
+                                    emi_option: response.emi_option,
                                     isAuthorized: (response.step === 'AUTHORIZED') // Set true if direct login
                                 };
 
@@ -230,7 +351,8 @@
                                         isAdmin: response.is_admin,
                                         profileVisible: response.profile_visible,
                                         renewalVisible: response.renewal_visible,
-                                        digitalDiscount: response.digital_discount
+                                        digitalDiscount: response.digital_discount,
+                                        emiOption: response.emi_option
                                     });
                                     
                                     if (response.step === 'AUTHORIZED') {
@@ -302,6 +424,7 @@
                                     profile_visible: response.profile_visible,
                                     renewal_visible: response.renewal_visible,
                                     digital_discount: response.digital_discount,
+                                    emi_option: response.emi_option,
                                     isAuthorized: (response.step === 'AUTHORIZED')
                                 };
 
@@ -310,7 +433,8 @@
                                         isAdmin: response.is_admin,
                                         profileVisible: response.profile_visible,
                                         renewalVisible: response.renewal_visible,
-                                        digitalDiscount: response.digital_discount
+                                        digitalDiscount: response.digital_discount,
+                                        emiOption: response.emi_option
                                     });
                                     if (response.step === 'AUTHORIZED') {
                                         console.log('⚡ [DIRECT LOGIN] OTP skipped.');
@@ -403,6 +527,7 @@
                             profile_visible: res.profile_visible,
                             renewal_visible: res.renewal_visible,
                             digital_discount: res.digital_discount,
+                            emi_option: res.emi_option,
                             is_admin: res.is_admin,
                             favUserProfile: finalProfile // Save with compatible keys
                         }, function() {
@@ -444,7 +569,7 @@
                 var aName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Unknown';
                 var aId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '--';
                 var card = document.createElement('button'); card.className = 'agent-card';
-                card.innerHTML = '<div class="agent-icon-box"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>' + (index < 9 ? '<div class="key-badge"><span>' + (index+1) + '</span><i class="fi fi-rr-edit"></i></div>' : '');
+                card.innerHTML = '<div class="agent-icon-box"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>' + '<div class="key-badge"><span>' + (index+1) + '</span><i class="fi fi-rr-edit"></i></div>';
                 
                 card.onclick = function(e) { 
                     // 🚀 If badge was clicked, handle it separately
@@ -628,45 +753,29 @@
             panelHeader.appendChild(backBtn);
             list.appendChild(panelHeader);
 
-            var loading = document.createElement('div');
-            loading.className = 'loading-dots';
-            loading.style.padding = '20px';
-            loading.innerHTML = '<div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div>';
-            list.appendChild(loading);
-
-            chrome.runtime.sendMessage({ type: 'GET_ALL_USERS' }, function(response) {
-                loading.remove();
-                if (response && response.success) {
-                    var users = response.users || [];
-                    var pendingUsers = users.filter(function(u) { return u.status.toLowerCase() === 'pending'; });
-                    var approvedUsers = users.filter(function(u) { return u.status.toLowerCase() === 'approved'; });
-
-                    // 1. PENDING SECTION
-                    if (pendingUsers.length > 0) {
-                        var pendingTitle = document.createElement('div');
-                        pendingTitle.style.cssText = 'font-size:10px; color:#ffb300; font-weight:700; margin:10px 0 5px 10px; letter-spacing:1px;';
-                        pendingTitle.innerText = 'PENDING APPROVAL (' + pendingUsers.length + ')';
-                        list.appendChild(pendingTitle);
-
-                        pendingUsers.forEach(function(user) {
-                            renderAdminUserCard(list, user, 'pending');
-                        });
-                    }
-
-                    // 2. APPROVED SECTION
-                    var approvedTitle = document.createElement('div');
-                    approvedTitle.style.cssText = 'font-size:10px; color:#4caf50; font-weight:700; margin:15px 0 5px 10px; letter-spacing:1px;';
-                    approvedTitle.innerText = 'APPROVED USERS (' + approvedUsers.length + ')';
-                    list.appendChild(approvedTitle);
-
-                    approvedUsers.forEach(function(user) {
-                        renderAdminUserCard(list, user, 'approved');
-                    });
-
-                } else {
-                    showGlobalError('Failed to fetch user list.');
-                }
+            // 👑 Master Toggle Box
+            var masterToggleContainer = document.createElement('div');
+            masterToggleContainer.style.cssText = 'padding:10px; display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.05); border-radius:8px; margin:10px; border:1px solid rgba(255,255,255,0.1);';
+            masterToggleContainer.innerHTML = '<div><div style="font-size:12px; font-weight:700; color:#ff9800;">Master Autopilot Mode</div><div style="font-size:9px; opacity:0.6; margin-top:2px;">Sequentially runs all agents in 2m range</div></div>';
+            
+            var toggleSwitch = document.createElement('input');
+            toggleSwitch.type = 'checkbox';
+            toggleSwitch.style.cssText = 'width:36px; height:18px; cursor:pointer;';
+            
+            chrome.storage.local.get(['is_master_extension'], function(res) {
+                toggleSwitch.checked = res.is_master_extension === true;
             });
+            
+            toggleSwitch.onchange = function() {
+                var checked = this.checked;
+                chrome.runtime.sendMessage({ type: 'SET_MASTER_MODE', payload: { isMaster: checked } }, function() {
+                    console.log('🔄 Master mode set to:', checked);
+                });
+            };
+            
+            masterToggleContainer.appendChild(toggleSwitch);
+            list.appendChild(masterToggleContainer);
+
         };
 
         var renderAdminUserCard = function(list, user, type) {
@@ -857,8 +966,7 @@
                 var successMsg = document.querySelector('.success-message');
                 var resendBtn = document.querySelector('.unlock a');
                 
-                // [NEW] Check for 'Invalid User Details' or 'Blocked' Errors on the page
-                var allErrors = document.querySelectorAll('.error-message.text-center');
+                var allErrors = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger');
                 var foundError = false;
 
                 allErrors.forEach(function(el) {
@@ -874,11 +982,50 @@
                         if (statusMsg) { statusMsg.innerText = 'NEED TO RESET PASSWORD'; statusMsg.style.color = '#ffb300'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
+                    } else if (txt.includes('Valid otp Number') || txt.includes('Valid OTP') || txt.includes('invalid otp')) {
+                        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Reloading...'; statusMsg.style.color = '#ff5252'; }
+                        if (loader) loader.style.display = 'none';
+                        foundError = true;
+                        // 🔄 Force reload page on invalid OTP
+                        console.log('⚠️ Invalid OTP detected! Force reloading page in 2 seconds...');
+                        setTimeout(function() { window.location.reload(); }, 2000);
+                    } else if (txt.includes('Something went wrong') || txt.includes('please try again')) {
+                        if (statusMsg) { statusMsg.innerText = 'ERROR - Reloading...'; statusMsg.style.color = '#ff5252'; }
+                        if (loader) loader.style.display = 'none';
+                        foundError = true;
+                        // 🔄 Force reload page on server error too
+                        console.log('⚠️ Something went wrong detected! Force reloading page in 2 seconds...');
+                        setTimeout(function() { window.location.reload(); }, 2000);
+                    } else if (txt.includes('connection has been closed')) {
+                        if (statusMsg) { statusMsg.innerText = 'CONNECTION CLOSED - Skipping...'; statusMsg.style.color = '#ff5252'; }
+                        if (loader) loader.style.display = 'none';
+                        foundError = true;
+                        // 🔄 Force reload + skip agent on connection closed
+                        console.log('⚠️ Connection closed detected! Reloading and skipping agent...');
+                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(r) {
+                            if (r.is_master_extension && r.is_autopilot_active && r.autopilot_agents) {
+                                var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
+                                chrome.storage.local.set({
+                                    autopilot_index: nextIndex,
+                                    autopilot_next_login_time: Date.now() + 5000
+                                }, function() {
+                                    console.log('⚠️ Autopilot: Skipped agent, next in 5s. Reloading...');
+                                    window.location.reload();
+                                });
+                            } else {
+                                window.location.reload();
+                            }
+                        });
                     }
                 });
 
                 if (foundError) {
                     observer.disconnect();
+                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
+                        if (res.is_master_extension && res.is_autopilot_active) {
+                            setTimeout(handleAutopilotError, 3000);
+                        }
+                    });
                     return;
                 }
 
@@ -961,10 +1108,20 @@
                                     }, 5000);
                                 } else {
                                     showGlobalError('OTP Not generated. Try again');
+                                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
+                                        if (res.is_master_extension && res.is_autopilot_active) {
+                                            setTimeout(handleAutopilotError, 3000);
+                                        }
+                                    });
                                 }
                             } else {
                                 // Final check after Resend also failed
                                 showGlobalError('OTP Not generated after Resend');
+                                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
+                                    if (res.is_master_extension && res.is_autopilot_active) {
+                                        setTimeout(handleAutopilotError, 3000);
+                                    }
+                                });
                             }
                         }
                     })
@@ -972,9 +1129,15 @@
                         console.error('Fetch Error:', e);
                         if (statusMsg) {
                             statusMsg.innerText = 'Fetch Failed.';
-                            setTimeout(function() {
-                                showGlobalError('Network Error. Please try again.');
-                            }, 1000);
+                            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
+                                if (res.is_master_extension && res.is_autopilot_active) {
+                                    setTimeout(handleAutopilotError, 3000);
+                                } else {
+                                    setTimeout(function() {
+                                        showGlobalError('Network Error. Please try again.');
+                                    }, 1000);
+                                }
+                            });
                         }
                     });
             }
@@ -1166,5 +1329,34 @@
     createLoginPopup(); 
     setInterval(urlMonitor, 1000);
     window.addEventListener('hashchange', urlMonitor);
+    // 🔄 Standalone watcher: Force reload + skip agent on "connection has been closed" error on login page
+    setInterval(function() {
+        var url = window.location.href;
+        if (!url.includes('#auth/login') && !url.includes('#/auth/login')) return;
+
+        var errorEls = document.querySelectorAll('.error-message.text-center');
+        errorEls.forEach(function(el) {
+            var txt = el.innerText || el.textContent || '';
+            if (txt.includes('connection has been closed')) {
+                console.log('⚠️ "Connection closed" error detected on login page! Force reloading & skipping agent...');
+                // Prevent repeated triggers
+                el.remove();
+                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(r) {
+                    if (r.is_master_extension && r.is_autopilot_active && r.autopilot_agents) {
+                        var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
+                        chrome.storage.local.set({
+                            autopilot_index: nextIndex,
+                            autopilot_next_login_time: Date.now() + 5000
+                        }, function() {
+                            console.log('⚠️ Autopilot: Skipped to agent index ' + nextIndex + '. Reloading...');
+                            window.location.reload();
+                        });
+                    } else {
+                        window.location.reload();
+                    }
+                });
+            }
+        });
+    }, 2000);
 
 })();
