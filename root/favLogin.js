@@ -86,14 +86,15 @@
         container.appendChild(list);
 
         var handleAutopilotError = function() {
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(res) {
-                if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents && res.autopilot_agents.length > 0) {
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+                if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents && res.autopilot_agents.length > 0) {
                     var nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                    var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                     chrome.storage.local.set({
                         autopilot_index: nextIndex,
-                        autopilot_next_login_time: Date.now() + 5000 // Start next in 5s
+                        autopilot_next_login_time: Date.now() + delayMs
                     }, function() {
-                        console.log('🤖 Autopilot Error handler: Reloading page to try next agent...');
+                        console.log('🤖 Autopilot Error handler: Reloading page to try next agent index ' + nextIndex + '...');
                         window.location.reload();
                     });
                 }
@@ -132,7 +133,12 @@
             var updateTimer = function() {
                 var timeLeft = Math.max(0, Math.ceil((nextLoginTime - Date.now()) / 1000));
                 var cdEl = document.getElementById('autoCountdown');
-                if (cdEl) cdEl.innerText = timeLeft + 's';
+                if (cdEl) {
+                    var mins = Math.floor(timeLeft / 60);
+                    var secs = timeLeft % 60;
+                    var displayStr = mins > 0 ? (mins + 'm ' + (secs < 10 ? '0' : '') + secs + 's') : (secs + 's');
+                    cdEl.innerText = displayStr;
+                }
                 
                 if (timeLeft <= 0) {
                     clearInterval(timerInterval);
@@ -148,7 +154,8 @@
                 var pin = prompt('🔒 Enter Security PIN to Pause Autopilot:');
                 if (pin === '1509') {
                     clearInterval(timerInterval);
-                    chrome.storage.local.set({ autopilot_paused: true }, function() {
+                    chrome.storage.local.set({ is_autopilot_active: false, autopilot_paused: true }, function() {
+                        console.log('⏸️ Autopilot Paused. Reverting extension to normal mode.');
                         onAuthorized();
                     });
                 } else {
@@ -191,13 +198,9 @@
             header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-check" style="color:#4caf50; font-size:18px;"></i><h3 class="fav-login-title">Select Agent Profile</h3></div>';
             
             chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_next_login_time', 'autopilot_agents'], function(res) {
-                if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents && res.autopilot_agents.length > 0) {
-                    if (res.autopilot_paused) {
-                        runAutopilotPausedUI(res.autopilot_agents, res.autopilot_index);
-                    } else {
-                        var nextLogin = res.autopilot_next_login_time || 0;
-                        runAutopilotUI(res.autopilot_agents, nextLogin, res.autopilot_index);
-                    }
+                if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                    var nextLogin = res.autopilot_next_login_time || 0;
+                    runAutopilotUI(res.autopilot_agents, nextLogin, res.autopilot_index);
                 } else {
                     chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
                         if (response && response.success) renderAgents(response.agents);
@@ -279,7 +282,7 @@
                 
                 if (profile && profile.email) {
                     // 🤖 Autopilot Auto-Login for User Card
-                    if (res.is_master_extension && res.is_autopilot_active) {
+                    if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                         console.log('🤖 Autopilot: Automatically triggering Extension User login...');
                         setTimeout(function() {
                             var uBtn = document.getElementById('btnUserLogin');
@@ -762,8 +765,8 @@
             toggleSwitch.type = 'checkbox';
             toggleSwitch.style.cssText = 'width:36px; height:18px; cursor:pointer;';
             
-            chrome.storage.local.get(['is_master_extension'], function(res) {
-                toggleSwitch.checked = res.is_master_extension === true;
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], function(res) {
+                toggleSwitch.checked = (res.is_master_extension === true && res.is_autopilot_active === true && res.autopilot_paused !== true);
             });
             
             toggleSwitch.onchange = function() {
@@ -1002,14 +1005,15 @@
                         foundError = true;
                         // 🔄 Force reload + skip agent on connection closed
                         console.log('⚠️ Connection closed detected! Reloading and skipping agent...');
-                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(r) {
-                            if (r.is_master_extension && r.is_autopilot_active && r.autopilot_agents) {
+                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
+                            if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents) {
                                 var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
+                                var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                                 chrome.storage.local.set({
                                     autopilot_index: nextIndex,
-                                    autopilot_next_login_time: Date.now() + 5000
+                                    autopilot_next_login_time: Date.now() + delayMs
                                 }, function() {
-                                    console.log('⚠️ Autopilot: Skipped agent, next in 5s. Reloading...');
+                                    console.log('⚠️ Autopilot: Skipped agent, next index ' + nextIndex + ' in ' + (delayMs / 60000) + 'm. Reloading...');
                                     window.location.reload();
                                 });
                             } else {
@@ -1021,8 +1025,8 @@
 
                 if (foundError) {
                     observer.disconnect();
-                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
-                        if (res.is_master_extension && res.is_autopilot_active) {
+                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], function(res) {
+                        if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                             setTimeout(handleAutopilotError, 3000);
                         }
                     });
@@ -1341,14 +1345,15 @@
                 console.log('⚠️ "Connection closed" error detected on login page! Force reloading & skipping agent...');
                 // Prevent repeated triggers
                 el.remove();
-                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], function(r) {
-                    if (r.is_master_extension && r.is_autopilot_active && r.autopilot_agents) {
+                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
+                    if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents) {
                         var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
+                        var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                         chrome.storage.local.set({
                             autopilot_index: nextIndex,
-                            autopilot_next_login_time: Date.now() + 5000
+                            autopilot_next_login_time: Date.now() + delayMs
                         }, function() {
-                            console.log('⚠️ Autopilot: Skipped to agent index ' + nextIndex + '. Reloading...');
+                            console.log('⚠️ Autopilot: Skipped to agent index ' + nextIndex + ' in ' + (delayMs / 60000) + 'm. Reloading...');
                             window.location.reload();
                         });
                     } else {

@@ -549,8 +549,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // 🤖 Autopilot Tab Redirector Loop
 setInterval(() => {
-  chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-    if (res.is_master_extension && res.is_autopilot_active) {
+  chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+    if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
       chrome.tabs.query({}, (tabs) => {
         const faveoTab = tabs.find(tab => tab.url && tab.url.includes('faveo.careinsurance.com'));
         if (!faveoTab) {

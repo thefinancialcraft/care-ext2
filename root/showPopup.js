@@ -439,8 +439,8 @@
     };
 
     const setMinimizedView = (shouldBeMinimized = true) => {
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-            if (res.is_master_extension && res.is_autopilot_active) {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                 shouldBeMinimized = false; // Force expanded view in Master Autopilot Mode
             }
 
@@ -2046,8 +2046,8 @@ const createCustomMonthActionUI = (monthsBack) => {
 
                         // 🤖 Autopilot: Extraction is now managed by the state machine watchdog.
                         // Do NOT trigger extraction here to avoid duplicate calls.
-                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-                            if (res.is_master_extension && res.is_autopilot_active) {
+                        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                            if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                                 console.log('🤖 Autopilot: 2-Month filter applied. State machine will handle extraction.');
                                 chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
                                 const customUI = document.getElementById('customMonthActions');
@@ -2637,8 +2637,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             return;
           }
           console.log('Renewal table data not found after retries.');
-          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-              if (res.is_master_extension && res.is_autopilot_active) {
+          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+              if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                   console.log('🤖 Autopilot: Table loading failed. Retrying extraction in 10 seconds...');
                   setTimeout(() => {
                       retryCount = 0;
@@ -2771,8 +2771,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 document.querySelectorAll('.spinner, #loader-spinner').forEach(el => el.remove());
             }, 1000);
 
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-                const autopilotActive = res.is_master_extension && res.is_autopilot_active;
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                const autopilotActive = res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused;
                 if (isAutoSyncRunning || autopilotActive) {
                     console.log('⚡ Autopilot/AutoSync: Extraction complete. Starting automatic API upload in 10s...');
                     setTimeout(() => { sendDataToAppScript(); }, 10000);
@@ -2981,14 +2981,15 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         updateMinimizedStatus(); // 🔄 Reset UI
 
         // 🤖 Autopilot Skip on Error
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], (res) => {
-            if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents) {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents) {
                 const nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                 chrome.storage.local.set({
                     autopilot_index: nextIndex,
-                    autopilot_next_login_time: Date.now() + 5000 // Start next in 5 seconds
+                    autopilot_next_login_time: Date.now() + delayMs
                 }, function() {
-                    console.log('⚠️ Autopilot: Upload failed, skipping to next agent in 5s...');
+                    console.log(`⚠️ Autopilot: Upload failed, skipping to next agent index ${nextIndex} in ${delayMs / 60000}m...`);
                     setTimeout(() => {
                         window.location.reload();
                     }, 2000);
@@ -3008,19 +3009,21 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         }
 
         // 🤖 Autopilot Logout Trigger
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_index', 'autopilot_agents'], (res) => {
-            if (res.is_master_extension && res.is_autopilot_active && res.autopilot_agents) {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents) {
                 console.log('🤖 Autopilot: Sync complete! Automatically logging out in 10 seconds...');
                 setTimeout(() => {
                     const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
                     if (logoutBtn) {
                         const nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+                        // 🚀 2 mins (120s) between normal agents, 10 mins (600s) when restarting full cycle at 1st agent (index 0)
+                        const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                         chrome.storage.local.set({
                             autopilot_index: nextIndex,
-                            autopilot_next_login_time: Date.now() + 60000 // 1 minute countdown starts
+                            autopilot_next_login_time: Date.now() + delayMs
                         }, function() {
                             logoutBtn.click();
-                            console.log('🤖 Autopilot: Clicked logout button.');
+                            console.log(`🤖 Autopilot: Clicked logout button. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
                         });
                     } else {
                         console.error('⚠️ Autopilot: Logout button not found! Attempting reload to retry...');
@@ -4345,8 +4348,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     const lastRun = localStorage.getItem(AUTO_RUN_KEY);
     const currentTime = Date.now();
 
-    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-        if (res.is_master_extension && res.is_autopilot_active) {
+    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+        if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
             console.log('🤖 Autopilot: Master Mode is active. Bypassing standard 2-hour Auto-Sync.');
             return;
         }
@@ -4444,18 +4447,22 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     // Re-acquire wake lock when tab becomes visible again
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-                if (res.is_master_extension && res.is_autopilot_active && !wakeLockSentinel) {
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && !wakeLockSentinel) {
                     acquireWakeLock();
+                } else if (res.autopilot_paused) {
+                    releaseWakeLock();
                 }
             });
         }
     });
 
     // Acquire on startup if autopilot is already active
-    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], (res) => {
-        if (res.is_master_extension && res.is_autopilot_active) {
+    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+        if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
             acquireWakeLock();
+        } else if (res.autopilot_paused) {
+            releaseWakeLock();
         }
     });
 
@@ -4466,8 +4473,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
     // 🤖 Autopilot Watchdog and Manager Loop
     setInterval(() => {
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_last_active_time'], (res) => {
-            if (res.is_master_extension && res.is_autopilot_active) {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_last_active_time'], (res) => {
+            if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                 const url = window.location.href;
                 
                 // Skip if we are on login/reset pages
