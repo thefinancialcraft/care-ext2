@@ -4613,12 +4613,27 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         }
     });
 
-    // Acquire on startup if autopilot is already active
+    // Acquire on startup if autopilot is already active & show Master Mode overlay
     chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
         if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
             acquireWakeLock();
+            createExtractionOverlay();
         } else if (res.autopilot_paused) {
             releaseWakeLock();
+        }
+    });
+
+    // 🔔 Real-time listener for Master Mode toggle changes
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local') {
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
+                if (isMasterMode) {
+                    createExtractionOverlay();
+                } else if (!isGamePlaying && !isExtractionPhaseDone) {
+                    removeExtractionOverlay();
+                }
+            });
         }
     });
 
@@ -4631,6 +4646,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     setInterval(() => {
         chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_last_active_time'], (res) => {
             if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
+                createExtractionOverlay();
                 const url = window.location.href;
                 
                 // Skip if we are on login/reset pages
