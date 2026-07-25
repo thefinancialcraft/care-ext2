@@ -3587,17 +3587,27 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         birdV = birdJump;
     };
 
-    const removeExtractionOverlay = () => {
-        if (extractionOverlayEl) {
-            window.removeEventListener('keydown', handleJump);
-            isBirdPlaying = false;
-            if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
-            extractionOverlayEl.style.opacity = '0';
-            setTimeout(() => {
-                extractionOverlayEl?.remove();
-                extractionOverlayEl = null;
-            }, 500);
-        }
+    const removeExtractionOverlay = (force = false) => {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+            const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
+            
+            // 🔒 In Master Mode, NEVER remove the Master Overlay for any step unless forced
+            if (isMasterMode && !force) {
+                console.log('🤖 Autopilot: Master Mode active. Overlay removal skipped to keep Master Overlay all-time active.');
+                return;
+            }
+
+            if (extractionOverlayEl) {
+                window.removeEventListener('keydown', handleJump);
+                isBirdPlaying = false;
+                if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
+                extractionOverlayEl.style.opacity = '0';
+                setTimeout(() => {
+                    extractionOverlayEl?.remove();
+                    extractionOverlayEl = null;
+                }, 500);
+            }
+        });
     };
 
     const createExtractionOverlay = () => {
@@ -3617,16 +3627,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
 
             if (isMasterMode) {
-                // 👑 MASTER MODE: Sleek Glassy Blur Overlay with macOS Browser Window Card
+                // 👑 MASTER MODE: Light Bright Frosted Glassy Overlay with macOS Browser Window Card
                 Object.assign(overlay.style, {
                     position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-                    backgroundColor: 'rgba(15, 23, 42, 0.70)',
-                    backdropFilter: 'blur(16px) saturate(180%)',
-                    webkitBackdropFilter: 'blur(16px) saturate(180%)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+                    backdropFilter: 'blur(8px) saturate(120%)',
+                    webkitBackdropFilter: 'blur(8px) saturate(120%)',
                     zIndex: '10001', display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center', color: '#0f172a',
                     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-                    transition: 'all 0.5s ease', opacity: '1'
+                    transition: 'all 0.4s ease', opacity: '1'
                 });
 
                 let currentAgentName = '';
@@ -3638,6 +3648,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     }
                 }
 
+                const savedOpacityStr = localStorage.getItem('master_overlay_opacity');
+                const savedOpacity = savedOpacityStr !== null ? parseInt(savedOpacityStr, 10) : 100;
+
                 const agentInfoHtml = currentAgentName 
                     ? `<div style="margin-top: 10px; font-size: 12px; color: #475569; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; background: rgba(241, 245, 249, 0.85); padding: 4px 14px; border-radius: 20px; border: 1px solid #e2e8f0;">
                          <span>Active Profile:</span> <strong style="color: #1e40af;">${currentAgentName}</strong>
@@ -3645,6 +3658,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     : '';
 
                 overlay.innerHTML = `
+                    <!-- macOS Dialog Window -->
                     <div class="mac-dialog-window" style="
                         width: 90%;
                         max-width: 520px;
@@ -3657,6 +3671,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         overflow: hidden;
                         animation: macWindowPop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
                         text-align: left;
+                        transition: opacity 0.2s ease;
                     ">
                         <!-- macOS Title Bar -->
                         <div style="
@@ -3805,6 +3820,110 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         </div>
                     </div>
 
+                    <!-- 🔘 Trigger Tooltip Button (Fixed on LEFT Screen Edge) -->
+                    <button id="overlay-sidebar-toggle-btn" title="Glass Visibility Controls" style="
+                        position: fixed;
+                        left: 0;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        z-index: 10006;
+                        background: rgba(255, 255, 255, 0.95);
+                        backdrop-filter: blur(15px);
+                        -webkit-backdrop-filter: blur(15px);
+                        border: 1px solid rgba(226, 232, 240, 0.9);
+                        border-left: none;
+                        border-radius: 0 12px 12px 0;
+                        padding: 10px 7px;
+                        box-shadow: 4px 0 15px rgba(0, 0, 0, 0.15);
+                        cursor: pointer;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 4px;
+                        color: #2563eb;
+                        transition: transform 0.3s ease, opacity 0.3s ease;
+                        pointer-events: auto !important;
+                    ">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <span style="writing-mode: vertical-rl; text-orientation: mixed; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: #475569; text-transform: uppercase;">GLASS</span>
+                    </button>
+
+                    <!-- 🎛️ Fixed-Width Auto-Hiding Glass Visibility Sidebar (Left Side with 10px Gap) -->
+                    <div id="overlay-sidebar-control" style="
+                        position: fixed;
+                        left: 10px;
+                        top: 50%;
+                        transform: translateY(-50%) translateX(-140%);
+                        width: 60px;
+                        z-index: 10005;
+                        background: rgba(255, 255, 255, 0.96);
+                        backdrop-filter: blur(20px);
+                        -webkit-backdrop-filter: blur(20px);
+                        border-radius: 16px;
+                        border: 1px solid rgba(255, 255, 255, 0.9);
+                        box-shadow: 0 15px 35px -5px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+                        padding: 14px 8px;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 10px;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        user-select: none;
+                        box-sizing: border-box;
+                        opacity: 0;
+                        pointer-events: none;
+                        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+                    ">
+                        <!-- Header Icon -->
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 3px; color: #1e293b;">
+                            <div style="
+                                width: 30px; height: 30px; border-radius: 9px;
+                                background: linear-gradient(135deg, #2563eb, #3b82f6);
+                                display: flex; align-items: center; justify-content: center;
+                                color: #fff; box-shadow: 0 3px 8px rgba(37, 99, 235, 0.3);
+                            ">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                            </div>
+                        </div>
+
+                        <!-- Value Badge -->
+                        <span id="glassOpacityVal" style="
+                            font-size: 11px; font-weight: 800; color: #1e40af; background: #eff6ff;
+                            padding: 2px 6px; border-radius: 8px; border: 1px solid #bfdbfe;
+                            min-width: 34px; text-align: center;
+                        ">${savedOpacity}%</span>
+
+                        <!-- Vertical Range Slider -->
+                        <div style="height: 100px; display: flex; align-items: center; justify-content: center; padding: 2px 0;">
+                            <input type="range" id="glassOpacitySlider" min="0" max="100" value="${savedOpacity}" style="
+                                writing-mode: bt-lr;
+                                -webkit-appearance: slider-vertical;
+                                width: 8px;
+                                height: 90px;
+                                cursor: pointer;
+                                accent-color: #2563eb;
+                            ">
+                        </div>
+
+                        <!-- Presets -->
+                        <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+                            <button id="preset100Btn" style="
+                                border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 9px; font-weight: 700;
+                                padding: 3px 4px; border-radius: 5px; cursor: pointer; transition: all 0.15s; width: 100%;
+                            " title="Full Glass Opacity">100%</button>
+                            <button id="preset0Btn" style="
+                                border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 9px; font-weight: 700;
+                                padding: 3px 4px; border-radius: 5px; cursor: pointer; transition: all 0.15s; width: 100%;
+                            " title="0% Glass Opacity (Transparent Background)">0%</button>
+                        </div>
+                    </div>
+
                     <style>
                         @keyframes macWindowPop {
                             from { opacity: 0; transform: scale(0.92) translateY(12px); }
@@ -3821,6 +3940,114 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         }
                     </style>
                 `;
+
+                // 🎛️ Bind Glass Visibility Slider & Auto-Hide Control Logic
+                setTimeout(() => {
+                    const toggleBtn = overlay.querySelector('#overlay-sidebar-toggle-btn');
+                    const sidebar = overlay.querySelector('#overlay-sidebar-control');
+                    const slider = overlay.querySelector('#glassOpacitySlider');
+                    const valLabel = overlay.querySelector('#glassOpacityVal');
+                    const preset100 = overlay.querySelector('#preset100Btn');
+                    const preset0 = overlay.querySelector('#preset0Btn');
+                    const mainCard = overlay.querySelector('.mac-dialog-window');
+
+                    let autoHideTimer = null;
+                    let isSidebarOpen = false;
+
+                    const hideSidebar = () => {
+                        if (!sidebar) return;
+                        sidebar.style.transform = 'translateY(-50%) translateX(-140%)';
+                        sidebar.style.opacity = '0';
+                        sidebar.style.pointerEvents = 'none';
+                        isSidebarOpen = false;
+                        if (autoHideTimer) clearTimeout(autoHideTimer);
+
+                        // Show trigger tooltip button when sidebar hides
+                        if (toggleBtn) {
+                            toggleBtn.style.opacity = '1';
+                            toggleBtn.style.pointerEvents = 'auto';
+                            toggleBtn.style.transform = 'translateY(-50%) translateX(0)';
+                        }
+                    };
+
+                    const showSidebar = () => {
+                        if (!sidebar) return;
+                        sidebar.style.transform = 'translateY(-50%) translateX(0)';
+                        sidebar.style.opacity = '1';
+                        sidebar.style.pointerEvents = 'auto';
+                        isSidebarOpen = true;
+
+                        // Hide trigger tooltip button when sidebar shows
+                        if (toggleBtn) {
+                            toggleBtn.style.opacity = '0';
+                            toggleBtn.style.pointerEvents = 'none';
+                            toggleBtn.style.transform = 'translateY(-50%) translateX(-100%)';
+                        }
+                        resetAutoHideTimer();
+                    };
+
+                    const resetAutoHideTimer = () => {
+                        if (autoHideTimer) clearTimeout(autoHideTimer);
+                        if (isSidebarOpen) {
+                            autoHideTimer = setTimeout(() => {
+                                hideSidebar();
+                            }, 5000); // 5 seconds inactivity auto-hide
+                        }
+                    };
+
+                    if (toggleBtn) {
+                        toggleBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            if (isSidebarOpen) hideSidebar();
+                            else showSidebar();
+                        });
+                    }
+
+                    if (sidebar) {
+                        sidebar.addEventListener('mouseenter', () => {
+                            if (autoHideTimer) clearTimeout(autoHideTimer);
+                        });
+                        sidebar.addEventListener('mouseleave', () => {
+                            resetAutoHideTimer();
+                        });
+                        sidebar.addEventListener('mousemove', () => {
+                            resetAutoHideTimer();
+                        });
+                    }
+
+                    const updateOverlayOpacity = (value) => {
+                        const numericVal = parseInt(value, 10);
+                        const alpha = numericVal / 100;
+                        
+                        if (valLabel) valLabel.innerText = numericVal + '%';
+                        if (slider) slider.value = numericVal;
+
+                        // 🛡️ Mac browser dialog window is NOT impacted - stays 100% visible
+                        if (mainCard) {
+                            mainCard.style.opacity = '1';
+                        }
+                        
+                        // 🪟 ONLY background glass backdrop & blur are controlled by the slider
+                        overlay.style.backgroundColor = `rgba(255, 255, 255, ${0.35 * alpha})`;
+                        overlay.style.backdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
+                        overlay.style.webkitBackdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
+
+                        localStorage.setItem('master_overlay_opacity', numericVal);
+                        resetAutoHideTimer();
+                    };
+
+                    updateOverlayOpacity(savedOpacity);
+
+                    if (slider) {
+                        slider.addEventListener('input', (e) => updateOverlayOpacity(e.target.value));
+                    }
+                    if (preset100) {
+                        preset100.addEventListener('click', () => updateOverlayOpacity(100));
+                    }
+                    if (preset0) {
+                        preset0.addEventListener('click', () => updateOverlayOpacity(0));
+                    }
+                }, 0);
             } else {
                 // 🎮 STANDARD MODE: Interactive Mini Games (Tic-Tac-Toe & Bird Game)
                 Object.assign(overlay.style, {
@@ -4332,6 +4559,13 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         });
     };
 
+    // ⚡ IMMEDIATE STARTUP EXECUTION: Show Master Overlay as soon as script runs
+    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+        if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
+            createExtractionOverlay();
+        }
+    });
+
     // ====== DIGITAL DISCOUNT ISOLATED REMOVER ======
     const createDigitalDiscountRemoverPopup = () => {
        chrome.storage.local.get(['digital_discount'], function(res) {
@@ -4630,8 +4864,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
                 if (isMasterMode) {
                     createExtractionOverlay();
-                } else if (!isGamePlaying && !isExtractionPhaseDone) {
-                    removeExtractionOverlay();
+                } else {
+                    removeExtractionOverlay(true); // Force remove when Master Mode turns OFF
                 }
             });
         }

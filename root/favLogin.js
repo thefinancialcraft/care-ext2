@@ -1172,6 +1172,35 @@
                 };
             }
             
+            // ⏱️ 12-Second Redirect Watchdog Timer: If lportal page is not reached within 12s of OTP Received, reload & skip agent
+            if (window.otpRedirectTimeout) clearTimeout(window.otpRedirectTimeout);
+            window.otpRedirectTimeout = setTimeout(function() {
+                var currentUrl = window.location.href.toLowerCase();
+                console.log('🔍 Checking OTP Redirect state after 12s. Current URL:', currentUrl);
+
+                if (!currentUrl.includes('lportal')) {
+                    console.warn('⚠️ OTP Received, but no redirection to lportal after 12 seconds! Reloading page & skipping agent...');
+                    
+                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
+                        if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents && r.autopilot_agents.length > 0) {
+                            var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
+                            var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                            chrome.storage.local.set({
+                                autopilot_index: nextIndex,
+                                autopilot_next_login_time: Date.now() + delayMs
+                            }, function() {
+                                console.log('⚠️ Autopilot: OTP Timeout. Skipped to agent index ' + nextIndex + '. Reloading...');
+                                window.location.reload();
+                            });
+                        } else {
+                            window.location.reload();
+                        }
+                    });
+                } else {
+                    console.log('✅ OTP Redirect successful! Reached lportal page.');
+                }
+            }, 12000);
+            
             // Extract digits robustly
             var rawData = typeof otpData === 'string' ? otpData : JSON.stringify(otpData);
             var otpArr = rawData.match(/\d/g);
