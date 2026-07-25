@@ -3609,217 +3609,369 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
         const overlay = document.createElement('div');
         overlay.id = 'extraction-game-overlay';
-        Object.assign(overlay.style, {
-            position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-            backgroundColor: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(10px)',
-            zIndex: '10001', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', color: '#fff',
-            fontFamily: 'sans-serif', transition: 'all 0.5s ease', opacity: '1'
-        });
-
-        overlay.innerHTML = `
-            <div id="ttt-intro-box" style="text-align:center; max-width:400px; padding:20px; animation:fadeIn 0.8s ease;">
-                <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
-                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both;"></div>
-                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.2s;"></div>
-                    <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.4s;"></div>
-                </div>
-                <p style="font-size:16px; line-height:1.6; color:rgba(255,255,255,0.9); margin-bottom:25px;">
-                    Sorry for the inconvenience, this scanning process will take a short amount of time. 
-                    Want to play a quick game while we work?
-                </p>
-                <div style="display:flex; gap:15px; justify-content:center;">
-                  <button id="start-ttt-btn" style="
-                      padding:12px 30px; border:none; border-radius:30px; 
-                      background: linear-gradient(135deg, #00c853, #64dd17); 
-                      color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
-                      box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
-                      Play Tic-Tac-Toe
-                  </button>
-                  <button id="start-bird-btn" style="
-                      padding:12px 30px; border:none; border-radius:30px; 
-                      background: linear-gradient(135deg, #ff9100, #ffab40); 
-                      color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
-                      box-shadow: 0 4px 15px rgba(255,145,0,0.3); transition: transform 0.2s;">
-                      Play Bird Game
-                  </button>
-                </div>
-            </div>
-            
-            <div id="ttt-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
-                <h3 id="ttt-status" style="margin-bottom:20px; color:#e3f2fd;">Your Turn (X)</h3>
-                <div id="ttt-grid-wrapper" style="position:relative; display:inline-block;">
-                    <div id="ttt-grid" style="
-                        display:grid; grid-template-columns: repeat(3, 100px); 
-                        grid-template-rows: repeat(3, 100px); gap:10px; 
-                        background:rgba(255,255,255,0.1); padding:10px; border-radius:15px;
-                        border: 2px solid rgba(255,255,255,0.2);">
-                        ${Array(9).fill(0).map((_, i) => '<div class="ttt-cell" data-index="' + i + '" style="width:100px; height:100px; background:rgba(255,255,255,0.05); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:40px; font-weight:bold; cursor:pointer; transition:0.2s;"></div>').join('')}
-                    </div>
-                    <!-- ✍️ Winning Line -->
-                    <div id="ttt-win-line" style="
-                        position:absolute; background:#fff; height:6px; border-radius:3px;
-                        display:none; pointer-events:none; transition: width 0.5s ease, opacity 0.3s;
-                        box-shadow: 0 0 15px #fff, 0 0 30px #4fc3f7; z-index:10; transform-origin: left center;">
-                    </div>
-                </div>
-                <div id="ttt-msg" style="margin-top:20px; font-weight:bold; min-height:60px;"></div>
-                <button id="back-ttt-btn" style="
-                    margin-top:15px; padding:8px 22px; border:none; border-radius:20px; 
-                    background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
-                    transition:background 0.2s;">
-                    Back to Menu
-                </button>
-            </div>
-
-            <div id="bird-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
-                <h3 id="bird-status" style="margin-bottom:10px; color:#e3f2fd;">Press SPACE or Click Canvas to Fly</h3>
-                <div style="position:relative; display:inline-block; background:#70c5ce; border:4px solid #fff; border-radius:15px; overflow:hidden;">
-                    <canvas id="bird-canvas" width="320" height="400" style="display:block; cursor:pointer;"></canvas>
-                </div>
-                <div id="bird-msg" style="margin-top:15px; font-weight:bold; min-height:40px; color:#fff; font-size:16px;">Score: 0</div>
-                <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
-                    <button id="restart-bird-btn" style="
-                        display:none; padding:8px 20px; border:none; border-radius:20px; 
-                        background:#fff; color:#ff9100; font-weight:bold; cursor:pointer; font-size:14px;
-                        box-shadow:0 4px 10px rgba(0,0,0,0.2);">
-                        Play Again
-                    </button>
-                    <button id="back-bird-btn" style="
-                        padding:8px 20px; border:none; border-radius:20px; 
-                        background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
-                        transition:background 0.2s;">
-                        Back to Menu
-                    </button>
-                </div>
-            </div>
-
-            <style>
-                @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
-                @keyframes zoomIn { from { transform: scale(0.8); opacity:0; } to { transform: scale(1); opacity:1; } }
-                @keyframes dot-dance { 0%, 80%, 100% { transform: scale(0); opacity: 0.3; } 40% { transform: scale(1); opacity: 1; } }
-                @keyframes glitter-fall { 0% { transform: translateY(-50px) rotate(0deg); opacity: 1; } 100% { transform: translateY(600px) rotate(720deg); opacity: 0; } }
-                @keyframes win-scale { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
-                .ttt-cell:hover { background: rgba(255,255,255,0.15) !important; transform: scale(0.95); }
-                .ttt-cell.taken { cursor: default; }
-                .ttt-celebration-text { animation: win-scale 1s infinite ease-in-out; font-size: 24px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
-                .glitter { position: fixed; width: 10px; height: 10px; pointer-events: none; z-index: 10005; animation: glitter-fall 2s ease-out forwards; }
-                #close-overlay-btn:hover { color: #fff !important; transform: scale(1.1); }
-            </style>
-        `;
-
-        document.body.appendChild(overlay);
         extractionOverlayEl = overlay;
 
-        const closeOverlayBtn = overlay.querySelector('#close-overlay-btn');
-        if (closeOverlayBtn) {
-            closeOverlayBtn.addEventListener('click', () => {
-                removeExtractionOverlay();
-            });
-        }
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_agents', 'autopilot_index'], (res) => {
+            if (!extractionOverlayEl || extractionOverlayEl !== overlay) return;
 
-        const playGameSound = (type) => {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
+            const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
+
+            if (isMasterMode) {
+                // 👑 MASTER MODE: Sleek Glassy Blur Overlay with macOS Browser Window Card
+                Object.assign(overlay.style, {
+                    position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+                    backgroundColor: 'rgba(15, 23, 42, 0.70)',
+                    backdropFilter: 'blur(16px) saturate(180%)',
+                    webkitBackdropFilter: 'blur(16px) saturate(180%)',
+                    zIndex: '10001', display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', color: '#0f172a',
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
+                    transition: 'all 0.5s ease', opacity: '1'
+                });
+
+                let currentAgentName = '';
+                if (res.autopilot_agents && res.autopilot_agents.length > 0) {
+                    const idx = res.autopilot_index || 0;
+                    const agentObj = res.autopilot_agents[idx % res.autopilot_agents.length];
+                    if (agentObj && (agentObj.name || agentObj.email)) {
+                        currentAgentName = agentObj.name || agentObj.email;
+                    }
                 }
 
-                const playTone = (freq, duration, type='sine') => {
-                    const osc = audioCtx.createOscillator();
-                    const gain = audioCtx.createGain();
-                    osc.connect(gain);
-                    gain.connect(audioCtx.destination);
-                    osc.type = type;
-                    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                    
-                    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
-                    
-                    osc.start();
-                    osc.stop(audioCtx.currentTime + duration);
-                };
+                const agentInfoHtml = currentAgentName 
+                    ? `<div style="margin-top: 10px; font-size: 12px; color: #475569; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; background: rgba(241, 245, 249, 0.85); padding: 4px 14px; border-radius: 20px; border: 1px solid #e2e8f0;">
+                         <span>Active Profile:</span> <strong style="color: #1e40af;">${currentAgentName}</strong>
+                       </div>` 
+                    : '';
 
-                if (type === 'X') playTone(600, 0.1, 'sine'); // High beep
-                else if (type === 'O') playTone(400, 0.1, 'sine'); // Low beep
-                else if (type === 'win') {
-                   [600, 800, 1000].forEach((f, i) => setTimeout(() => playTone(f, 0.3), i * 150));
-                } else if (type === 'draw') {
-                   [400, 300, 200].forEach((f, i) => setTimeout(() => playTone(f, 0.3), i * 150));
+                overlay.innerHTML = `
+                    <div class="mac-dialog-window" style="
+                        width: 90%;
+                        max-width: 520px;
+                        background: rgba(255, 255, 255, 0.96);
+                        backdrop-filter: blur(25px);
+                        -webkit-backdrop-filter: blur(25px);
+                        border-radius: 16px;
+                        border: 1px solid rgba(255, 255, 255, 0.9);
+                        box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.08);
+                        overflow: hidden;
+                        animation: macWindowPop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+                        text-align: left;
+                    ">
+                        <!-- macOS Title Bar -->
+                        <div style="
+                            height: 42px;
+                            background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+                            border-bottom: 1px solid #dee2e6;
+                            display: flex;
+                            align-items: center;
+                            padding: 0 16px;
+                            position: relative;
+                            user-select: none;
+                        ">
+                            <!-- Traffic Light Control Buttons -->
+                            <div style="display: flex; align-items: center; gap: 8px; position: absolute; left: 16px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background: #ff5f56; border: 0.5px solid #e0443e; box-shadow: inset 0 1px 1px rgba(0,0,0,0.1);"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background: #ffbd2e; border: 0.5px solid #dea123; box-shadow: inset 0 1px 1px rgba(0,0,0,0.1);"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background: #27c93f; border: 0.5px solid #1aab29; box-shadow: inset 0 1px 1px rgba(0,0,0,0.1);"></div>
+                            </div>
+
+                            <!-- Mac Address Pill -->
+                            <div style="
+                                margin: 0 auto;
+                                background: #ffffff;
+                                border: 1px solid #ced4da;
+                                border-radius: 7px;
+                                padding: 4px 16px;
+                                font-size: 11.5px;
+                                font-weight: 600;
+                                color: #495057;
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                box-shadow: inset 0 1px 2px rgba(0,0,0,0.03);
+                                letter-spacing: 0.2px;
+                            ">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                </svg>
+                                <span>master.extension // security-controlled</span>
+                            </div>
+                        </div>
+
+                        <!-- Card Body -->
+                        <div style="padding: 32px 28px 26px 28px; text-align: center; color: #1e293b;">
+                            <!-- Shield Icon Badge -->
+                            <div style="position: relative; display: inline-block; margin-bottom: 20px;">
+                                <div style="
+                                    width: 72px;
+                                    height: 72px;
+                                    border-radius: 22px;
+                                    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 50%, #3b82f6 100%);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    margin: 0 auto;
+                                    box-shadow: 0 12px 25px -6px rgba(37, 99, 235, 0.45);
+                                ">
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                                        <path d="m9 12 2 2 4-4"></path>
+                                    </svg>
+                                </div>
+                                <div style="
+                                    position: absolute;
+                                    top: -5px; left: -5px; right: -5px; bottom: -5px;
+                                    border-radius: 26px;
+                                    border: 2px solid rgba(59, 130, 246, 0.4);
+                                    animation: masterPulseRing 2s infinite ease-in-out;
+                                    pointer-events: none;
+                                "></div>
+                            </div>
+
+                            <!-- Header -->
+                            <h2 style="
+                                margin: 0 0 10px 0;
+                                font-size: 20px;
+                                font-weight: 750;
+                                color: #0f172a;
+                                letter-spacing: -0.4px;
+                                line-height: 1.35;
+                            ">
+                                This site is controlled by Master Extension
+                            </h2>
+
+                            <!-- Description -->
+                            <p style="
+                                margin: 0 0 16px 0;
+                                font-size: 13.5px;
+                                line-height: 1.6;
+                                color: #64748b;
+                                max-width: 430px;
+                                margin-left: auto;
+                                margin-right: auto;
+                            ">
+                                Automated data extraction & autopilot sequence is actively running in this browser window. Please do not close or navigate away from this tab.
+                            </p>
+
+                            ${agentInfoHtml}
+
+                            <!-- Live Status Badge -->
+                            <div style="margin-top: 18px;">
+                                <div style="
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                    background: #f0fdf4;
+                                    border: 1px solid #bbf7d0;
+                                    padding: 9px 20px;
+                                    border-radius: 30px;
+                                    color: #15803d;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    box-shadow: 0 2px 6px rgba(34, 197, 94, 0.08);
+                                ">
+                                    <span style="
+                                        width: 9px;
+                                        height: 9px;
+                                        border-radius: 50%;
+                                        background: #22c55e;
+                                        box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+                                        animation: statusPulseDot 1.5s infinite;
+                                    "></span>
+                                    <span>Master Autopilot Active &bull; Syncing System Data</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Footer -->
+                        <div style="
+                            background: #f8fafc;
+                            border-top: 1px solid #e2e8f0;
+                            padding: 12px 20px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            font-size: 11.5px;
+                            color: #94a3b8;
+                            font-weight: 500;
+                        ">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="width: 6px; height: 6px; border-radius: 50%; background: #2563eb; display: inline-block;"></span>
+                                <span>Protected Master Session</span>
+                            </div>
+                            <span>Faveo Care Extension</span>
+                        </div>
+                    </div>
+
+                    <style>
+                        @keyframes macWindowPop {
+                            from { opacity: 0; transform: scale(0.92) translateY(12px); }
+                            to { opacity: 1; transform: scale(1) translateY(0); }
+                        }
+                        @keyframes masterPulseRing {
+                            0% { transform: scale(0.97); opacity: 0.8; }
+                            50% { transform: scale(1.06); opacity: 0.15; }
+                            100% { transform: scale(0.97); opacity: 0.8; }
+                        }
+                        @keyframes statusPulseDot {
+                            0%, 100% { opacity: 1; transform: scale(1); }
+                            50% { opacity: 0.35; transform: scale(0.8); }
+                        }
+                    </style>
+                `;
+            } else {
+                // 🎮 STANDARD MODE: Interactive Mini Games (Tic-Tac-Toe & Bird Game)
+                Object.assign(overlay.style, {
+                    position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
+                    backgroundColor: 'rgba(0, 0, 0, 0.65)', backdropFilter: 'blur(10px)',
+                    zIndex: '10001', display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', color: '#fff',
+                    fontFamily: 'sans-serif', transition: 'all 0.5s ease', opacity: '1'
+                });
+
+                overlay.innerHTML = `
+                    <div id="ttt-intro-box" style="text-align:center; max-width:400px; padding:20px; animation:fadeIn 0.8s ease;">
+                        <div style="display:flex; justify-content:center; gap:8px; margin-bottom:20px;">
+                            <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both;"></div>
+                            <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.2s;"></div>
+                            <div style="width:12px; height:12px; border-radius:50%; background:#e3f2fd; animation:dot-dance 1.4s infinite ease-in-out both; animation-delay: 0.4s;"></div>
+                        </div>
+                        <p style="font-size:16px; line-height:1.6; color:rgba(255,255,255,0.9); margin-bottom:25px;">
+                            Sorry for the inconvenience, this scanning process will take a short amount of time. 
+                            Want to play a quick game while we work?
+                        </p>
+                        <div style="display:flex; gap:15px; justify-content:center;">
+                          <button id="start-ttt-btn" style="
+                              padding:12px 30px; border:none; border-radius:30px; 
+                              background: linear-gradient(135deg, #00c853, #64dd17); 
+                              color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                              box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
+                              Play Tic-Tac-Toe
+                          </button>
+                          <button id="start-bird-btn" style="
+                              padding:12px 30px; border:none; border-radius:30px; 
+                              background: linear-gradient(135deg, #ff9100, #ffab40); 
+                              color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                              box-shadow: 0 4px 15px rgba(255,145,0,0.3); transition: transform 0.2s;">
+                              Play Bird Game
+                          </button>
+                        </div>
+                    </div>
+                    
+                    <div id="ttt-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
+                        <h3 id="ttt-status" style="margin-bottom:20px; color:#e3f2fd;">Your Turn (X)</h3>
+                        <div id="ttt-grid-wrapper" style="position:relative; display:inline-block;">
+                            <div id="ttt-grid" style="
+                                display:grid; grid-template-columns: repeat(3, 100px); 
+                                grid-template-rows: repeat(3, 100px); gap:10px; 
+                                background:rgba(255,255,255,0.1); padding:10px; border-radius:15px;
+                                border: 2px solid rgba(255,255,255,0.2);">
+                                ${Array(9).fill(0).map((_, i) => '<div class="ttt-cell" data-index="' + i + '" style="width:100px; height:100px; background:rgba(255,255,255,0.05); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:40px; font-weight:bold; cursor:pointer; transition:0.2s;"></div>').join('')}
+                            </div>
+                            <!-- ✍️ Winning Line -->
+                            <div id="ttt-win-line" style="
+                                position:absolute; background:#fff; height:6px; border-radius:3px;
+                                display:none; pointer-events:none; transition: width 0.5s ease, opacity 0.3s;
+                                box-shadow: 0 0 15px #fff, 0 0 30px #4fc3f7; z-index:10; transform-origin: left center;">
+                            </div>
+                        </div>
+                        <div id="ttt-msg" style="margin-top:20px; font-weight:bold; min-height:60px;"></div>
+                        <button id="back-ttt-btn" style="
+                            margin-top:15px; padding:8px 22px; border:none; border-radius:20px; 
+                            background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
+                            transition:background 0.2s;">
+                            Back to Menu
+                        </button>
+                    </div>
+
+                    <div id="bird-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
+                        <h3 id="bird-status" style="margin-bottom:10px; color:#e3f2fd;">Press SPACE or Click Canvas to Fly</h3>
+                        <div style="position:relative; display:inline-block; background:#70c5ce; border:4px solid #fff; border-radius:15px; overflow:hidden;">
+                            <canvas id="bird-canvas" width="320" height="400" style="display:block; cursor:pointer;"></canvas>
+                        </div>
+                        <div id="bird-msg" style="margin-top:15px; font-weight:bold; min-height:40px; color:#fff; font-size:16px;">Score: 0</div>
+                        <div style="display:flex; gap:10px; justify-content:center; margin-top:10px;">
+                            <button id="restart-bird-btn" style="
+                                display:none; padding:8px 20px; border:none; border-radius:20px; 
+                                background:#fff; color:#ff9100; font-weight:bold; cursor:pointer; font-size:14px;
+                                box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+                                Play Again
+                            </button>
+                            <button id="back-bird-btn" style="
+                                padding:8px 20px; border:none; border-radius:20px; 
+                                background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
+                                transition:background 0.2s;">
+                                Back to Menu
+                            </button>
+                        </div>
+                    </div>
+
+                    <style>
+                        @keyframes fadeIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+                        @keyframes zoomIn { from { transform: scale(0.8); opacity:0; } to { transform: scale(1); opacity:1; } }
+                        @keyframes dot-dance { 0%, 80%, 100% { transform: scale(0); opacity: 0.3; } 40% { transform: scale(1); opacity: 1; } }
+                        @keyframes glitter-fall { 0% { transform: translateY(-50px) rotate(0deg); opacity: 1; } 100% { transform: translateY(600px) rotate(720deg); opacity: 0; } }
+                        @keyframes win-scale { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+                        .ttt-cell:hover { background: rgba(255,255,255,0.15) !important; transform: scale(0.95); }
+                        .ttt-cell.taken { cursor: default; }
+                        .ttt-celebration-text { animation: win-scale 1s infinite ease-in-out; font-size: 24px; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+                        .glitter { position: fixed; width: 10px; height: 10px; pointer-events: none; z-index: 10005; animation: glitter-fall 2s ease-out forwards; }
+                        #close-overlay-btn:hover { color: #fff !important; transform: scale(1.1); }
+                    </style>
+                `;
+
+                const startBtn = overlay.querySelector('#start-ttt-btn');
+                if (startBtn) {
+                    startBtn.addEventListener('click', () => {
+                        isGamePlaying = true;
+                        overlay.querySelector('#ttt-intro-box').style.display = 'none';
+                        overlay.querySelector('#ttt-game-container').style.display = 'block';
+                        playGameSound('X'); 
+                        determineFirstTurn();
+                    });
                 }
-            } catch (e) {
-                console.warn('Web Audio API blocked or failed:', e);
-            }
-        };
 
-        // Event Listeners
-        const determineFirstTurn = () => {
-             // 🎲 Randomly assign symbols to Human/Computer
-             if (Math.random() < 0.5) {
-                 tttHumanSymbol = 'X';
-                 tttComputerSymbol = 'O';
-             } else {
-                 tttHumanSymbol = 'O';
-                 tttComputerSymbol = 'X';
-             }
+                const backTttBtn = overlay.querySelector('#back-ttt-btn');
+                if (backTttBtn) {
+                    backTttBtn.addEventListener('click', () => {
+                        isGamePlaying = false;
+                        overlay.querySelector('#ttt-game-container').style.display = 'none';
+                        overlay.querySelector('#ttt-intro-box').style.display = 'block';
+                    });
+                }
 
-             const statusText = document.getElementById('ttt-status');
-             tttGameCount++;
-             tttCurrentTurn = 'X';
-             tttIsBotDumbThisMatch = (tttGameCount > 1 && Math.random() < 0.1);
-             
-             if (tttHumanSymbol === 'X') {
-                 if (statusText) statusText.innerText = `You are 'X' - Your Turn!`;
-             } else {
-                 if (statusText) statusText.innerText = `You are 'O' - Computer's Turn ('X')...`;
-                 setTimeout(makeComputerMove, 1000);
-             }
-        };
+                const backBirdBtn = overlay.querySelector('#back-bird-btn');
+                if (backBirdBtn) {
+                    backBirdBtn.addEventListener('click', () => {
+                        isBirdPlaying = false;
+                        window.removeEventListener('keydown', handleJump);
+                        if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
+                        overlay.querySelector('#bird-game-container').style.display = 'none';
+                        overlay.querySelector('#ttt-intro-box').style.display = 'block';
+                    });
+                }
 
-        const startBtn = overlay.querySelector('#start-ttt-btn');
-        startBtn.addEventListener('click', () => {
-            isGamePlaying = true;
-            overlay.querySelector('#ttt-intro-box').style.display = 'none';
-            overlay.querySelector('#ttt-game-container').style.display = 'block';
-            
-            // 🚀 Warm-up AudioContext and Decide first turn
-            playGameSound('X'); 
-            determineFirstTurn();
-        });
+                const startBirdBtn = overlay.querySelector('#start-bird-btn');
+                if (startBirdBtn) {
+                    startBirdBtn.addEventListener('click', () => {
+                        overlay.querySelector('#ttt-intro-box').style.display = 'none';
+                        overlay.querySelector('#bird-game-container').style.display = 'block';
+                        playGameSound('X'); 
+                        startBirdGame();
+                    });
+                }
 
-        const backTttBtn = overlay.querySelector('#back-ttt-btn');
-        backTttBtn.addEventListener('click', () => {
-            isGamePlaying = false;
-            overlay.querySelector('#ttt-game-container').style.display = 'none';
-            overlay.querySelector('#ttt-intro-box').style.display = 'block';
-        });
+                const restartBirdBtn = overlay.querySelector('#restart-bird-btn');
+                if (restartBirdBtn) {
+                    restartBirdBtn.addEventListener('click', () => {
+                        playGameSound('X');
+                        startBirdGame();
+                    });
+                }
 
-        const backBirdBtn = overlay.querySelector('#back-bird-btn');
-        backBirdBtn.addEventListener('click', () => {
-            isBirdPlaying = false;
-            window.removeEventListener('keydown', handleJump);
-            if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
-            overlay.querySelector('#bird-game-container').style.display = 'none';
-            overlay.querySelector('#ttt-intro-box').style.display = 'block';
-        });
-
-        // 🐦 Bird Game Listeners & Implementation
-        const startBirdBtn = overlay.querySelector('#start-bird-btn');
-        startBirdBtn.addEventListener('click', () => {
-            overlay.querySelector('#ttt-intro-box').style.display = 'none';
-            overlay.querySelector('#bird-game-container').style.display = 'block';
-            
-            playGameSound('X'); 
-            startBirdGame();
-        });
-
-        const restartBirdBtn = overlay.querySelector('#restart-bird-btn');
-        restartBirdBtn.addEventListener('click', () => {
-            playGameSound('X');
-            startBirdGame();
-        });
-
-        const startBirdGame = () => {
+                const startBirdGame = () => {
             isBirdPlaying = true;
             birdY = 200;
             birdV = 0;
@@ -4174,6 +4326,10 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             }
             return false;
         }
+            } // End of standard mode
+
+            document.body.appendChild(overlay);
+        });
     };
 
     // ====== DIGITAL DISCOUNT ISOLATED REMOVER ======
