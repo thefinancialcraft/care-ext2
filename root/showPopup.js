@@ -3558,6 +3558,51 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     let tttGameCount = 0; // 📉 Track games to prevent 1st match human win
     let tttIsBotDumbThisMatch = false; // 🤖 Match-level difficulty flag
 
+    // 🎵 Synthesized Web Audio API sound effects for mini games
+    const playGameSound = (type) => {
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            const now = ctx.currentTime;
+            if (type === 'X') {
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'O') {
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.exponentialRampToValueAtTime(300, now + 0.1);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'win') {
+                osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.setValueAtTime(659.25, now + 0.1);
+                osc.frequency.setValueAtTime(783.99, now + 0.2);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+                osc.start(now);
+                osc.stop(now + 0.35);
+            } else if (type === 'draw') {
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.linearRampToValueAtTime(150, now + 0.2);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            }
+        } catch (e) {}
+    };
+
     // 🐦 Bird Game Variables
     let isBirdPlaying = false;
     let birdCanvas = null;
@@ -3571,6 +3616,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     let obstacles = [];
     let birdScore = 0;
     let birdFrameCount = 0;
+    let startBirdGame = null;
 
     const handleJump = (e) => {
         const container = document.getElementById('bird-game-container');
@@ -3579,7 +3625,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         if (!isBirdPlaying) {
             if (e.type === 'keydown' && e.code !== 'Space') return;
             if (e.type === 'keydown') e.preventDefault();
-            startBirdGame();
+            if (typeof startBirdGame === 'function') startBirdGame();
             return;
         }
         if (e.type === 'keydown' && e.code !== 'Space') return;
@@ -4149,6 +4195,26 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     </style>
                 `;
 
+                const determineFirstTurn = () => {
+                    tttBoard = Array(9).fill(null);
+                    const cells = overlay.querySelectorAll('.ttt-cell');
+                    cells.forEach(c => {
+                        c.innerText = '';
+                        c.classList.remove('taken');
+                    });
+                    const msgEl = overlay.querySelector('#ttt-msg');
+                    if (msgEl) msgEl.innerHTML = '';
+                    const winLine = overlay.querySelector('#ttt-win-line');
+                    if (winLine) winLine.style.display = 'none';
+
+                    tttHumanSymbol = 'X';
+                    tttComputerSymbol = 'O';
+
+                    const statusTxt = overlay.querySelector('#ttt-status');
+                    tttCurrentTurn = 'X';
+                    if (statusTxt) statusTxt.innerText = "Your Turn ('X')";
+                };
+
                 const startBtn = overlay.querySelector('#start-ttt-btn');
                 if (startBtn) {
                     startBtn.addEventListener('click', () => {
@@ -4186,7 +4252,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         overlay.querySelector('#ttt-intro-box').style.display = 'none';
                         overlay.querySelector('#bird-game-container').style.display = 'block';
                         playGameSound('X'); 
-                        startBirdGame();
+                        if (typeof startBirdGame === 'function') startBirdGame();
                     });
                 }
 
@@ -4194,11 +4260,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (restartBirdBtn) {
                     restartBirdBtn.addEventListener('click', () => {
                         playGameSound('X');
-                        startBirdGame();
+                        if (typeof startBirdGame === 'function') startBirdGame();
                     });
                 }
 
-                const startBirdGame = () => {
+                startBirdGame = () => {
             isBirdPlaying = true;
             birdY = 200;
             birdV = 0;
