@@ -315,12 +315,39 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
     const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
 
+    let startDate = null;
+    let endDate = null;
+
+    if (Array.isArray(tableDataToUpload) && tableDataToUpload.length > 0) {
+      const dates = tableDataToUpload
+        .map(row => {
+          let dVal = null;
+          for (let key in row) {
+            if (key && key.trim().toUpperCase().replace(/\.+$/, '') === 'LOGIN_DATE') {
+              dVal = row[key];
+              break;
+            }
+          }
+          return dVal ? dVal.toString().trim() : null;
+        })
+        .filter(Boolean);
+
+      if (dates.length > 0) {
+        // Sort dates to find min (start_date) and max (end_date)
+        dates.sort((a, b) => new Date(a) - new Date(b));
+        startDate = dates[0];
+        endDate = dates[dates.length - 1];
+      }
+    }
+
     const logPayload = {
       agent_id: res.selectedAgentId || null,
       agent_name: res.selectedAgentName || null,
       status: status,
       total_records: totalRecords,
       uploaded_records: uploadedRecords,
+      start_date: startDate,
+      end_date: endDate,
       error_message: errorMessage,
       timestamp: new Date().toISOString()
     };
