@@ -99,6 +99,7 @@ function startUploadLoop() {
       uploaded: uploadState.uploaded
     });
     syncStateToStorage();
+    logSyncToSupabase('SUCCESS', uploadState.total, uploadState.uploaded, null);
 
     chrome.storage.local.get(['useGoogleSheet'], (res) => {
       if (!res.useGoogleSheet) {
@@ -309,6 +310,40 @@ function startUploadLoop() {
   });
 }
 
+function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorMessage = null) {
+  chrome.storage.local.get(['selectedAgentId', 'selectedAgentName'], (res) => {
+    const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    const logPayload = {
+      agent_id: res.selectedAgentId || null,
+      agent_name: res.selectedAgentName || null,
+      status: status,
+      total_records: totalRecords,
+      uploaded_records: uploadedRecords,
+      error_message: errorMessage,
+      timestamp: new Date().toISOString()
+    };
+
+    fetch(SUPABASE_LOGS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      },
+      body: JSON.stringify(logPayload)
+    })
+      .then(res => {
+        if (!res.ok) console.warn('⚠️ Supabase Log insert returned status:', res.status);
+        else console.log('📝 Sync Log updated in faveo_logs table:', status);
+      })
+      .catch(err => {
+        console.error('❌ Error updating faveo_logs table:', err);
+      });
+  });
+}
+
 function handleUploadError(errMsg) {
   uploadState.isPaused = true;
   uploadState.isError = true;
@@ -319,6 +354,7 @@ function handleUploadError(errMsg) {
     error: errMsg
   });
   syncStateToStorage();
+  logSyncToSupabase('ERROR', uploadState.total, uploadState.uploaded, errMsg);
 }
 
 function sendUpdateToContent(type, payload) {
@@ -348,7 +384,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sessionStartTime: Date.now()
     };
     syncStateToStorage();
-    if (uploadState.currentIndex < uploadState.total) startUploadLoop();
+    if (uploadState.currentIndex < uploadState.total) {
+      logSyncToSupabase('STARTED', uploadState.total, uploadState.uploaded, null);
+      startUploadLoop();
+    }
     else sendUpdateToContent('UPLOAD_COMPLETE', { total: uploadState.total, uploaded: uploadState.uploaded, preChecked: true });
   }
   else if (message.type === 'PAUSE_UPLOAD') {

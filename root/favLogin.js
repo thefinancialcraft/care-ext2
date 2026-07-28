@@ -980,6 +980,7 @@
         };
 
         var startLoginCycle = function(agent, aName, aId, list) {
+            chrome.storage.local.set({ selectedAgentName: aName, selectedAgentId: aId });
             list.innerHTML = '';
             var activeCard = document.createElement('div');
             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
