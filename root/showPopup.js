@@ -2494,6 +2494,14 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     const endVal = formatDate(today);
     console.log(`🔍 Intent: Applying filter [${startVal}] to [${endVal}]`);
 
+    // 🔒 RECORD DATES IMMEDIATELY TO STORAGE BEFORE ANY UI ACTION / EXTRACTION
+    const domFromVal = document.getElementById('from_date')?.value?.trim() || document.querySelector('input[id*="from_date"]')?.value?.trim();
+    const domToVal = document.getElementById('to_date')?.value?.trim() || document.querySelector('input[id*="to_date"]')?.value?.trim();
+    chrome.storage.local.set({
+        filterStartDate: domFromVal || startVal,
+        filterEndDate: domToVal || endVal
+    });
+
     // 2. Click proposals link
     const proposalBtn = document.querySelector('.button.view_proposals_btn');
     proposalBtn?.click();
@@ -2523,22 +2531,41 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
     setTimeout(() => {
         // 3. Sync to DOM
-        const fromInput = document.getElementById('from_date') || document.getElementById('from_date1');
-        const toInput = document.getElementById('to_date') || document.getElementById('to_date1');
+        const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
+        const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
 
         if (fromInput && toInput) {
-            fromInput.value = startVal;
-            fromInput.dispatchEvent(new Event('input', { bubbles: true }));
-            fromInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-            toInput.value = endVal;
-            toInput.dispatchEvent(new Event('input', { bubbles: true }));
-            toInput.dispatchEvent(new Event('change', { bubbles: true }));
+            if (!fromInput.value) {
+                fromInput.value = startVal;
+                fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+                fromInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (!toInput.value) {
+                toInput.value = endVal;
+                toInput.dispatchEvent(new Event('input', { bubbles: true }));
+                toInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const activeFrom = fromInput.value.trim() || startVal;
+            const activeTo = toInput.value.trim() || endVal;
+            chrome.storage.local.set({ filterStartDate: activeFrom, filterEndDate: activeTo });
+        } else {
+            chrome.storage.local.set({ filterStartDate: startVal, filterEndDate: endVal });
         }
 
         // 4. Start Extraction
         setTimeout(() => {
             spinner.remove();
+            
+            // Read fresh values right before extraction
+            const currentFrom = document.getElementById('from_date')?.value?.trim() || document.querySelector('input[id*="from_date"]')?.value?.trim();
+            const currentTo = document.getElementById('to_date')?.value?.trim() || document.querySelector('input[id*="to_date"]')?.value?.trim();
+            if (currentFrom || currentTo) {
+                chrome.storage.local.set({
+                    filterStartDate: currentFrom || startVal,
+                    filterEndDate: currentTo || endVal
+                });
+            }
+            
             extractRenewalTableData();
         }, 1500);
 
@@ -2554,6 +2581,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
     const extractRenewalTableData = () => {
       extensionGlobalActive = true; // 🛡️ Force globally active before starting
+
+      // Save exact date filter inputs from DOM
+      const domFrom = document.getElementById('from_date')?.value?.trim();
+      const domTo = document.getElementById('to_date')?.value?.trim();
+      if (domFrom || domTo) {
+          chrome.storage.local.set({
+              filterStartDate: domFrom || null,
+              filterEndDate: domTo || null
+          });
+      }
 
       // PREVENT MULTIPLE CONCURRENT EXTRACTIONS
       if (document.getElementById('liveExtractModal')) {

@@ -311,7 +311,7 @@ function startUploadLoop() {
 }
 
 function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorMessage = null) {
-  chrome.storage.local.get(['selectedAgentId', 'selectedAgentName'], (res) => {
+  chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'filterStartDate', 'filterEndDate'], (res) => {
     const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
 
@@ -323,9 +323,12 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
         .map(row => {
           let dVal = null;
           for (let key in row) {
-            if (key && key.trim().toUpperCase().replace(/\.+$/, '') === 'LOGIN_DATE') {
-              dVal = row[key];
-              break;
+            if (key) {
+              const cleanKey = key.trim().toUpperCase().replace(/\.+$/, '');
+              if (cleanKey === 'LOGIN_DATE' || cleanKey === 'POLICY_START_DATE' || cleanKey.includes('DATE')) {
+                dVal = row[key];
+                if (cleanKey === 'LOGIN_DATE') break; // Prioritize LOGIN_DATE
+              }
             }
           }
           return dVal ? dVal.toString().trim() : null;
@@ -333,14 +336,42 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
         .filter(Boolean);
 
       if (dates.length > 0) {
-        // Sort dates to find min (start_date) and max (end_date)
-        dates.sort((a, b) => new Date(a) - new Date(b));
-        startDate = dates[0];
-        endDate = dates[dates.length - 1];
+        // Parse and sort dates to find min (start_date) and max (end_date)
+        const parsed = dates.map(d => {
+          const parts = d.split(/[\/\-\.]/);
+          let dateObj = null;
+          if (parts.length === 3) {
+            if (parts[0].length === 4) dateObj = new Date(parts[0], parts[1] - 1, parts[2]); // YYYY-MM-DD
+            else dateObj = new Date(parts[2], parts[1] - 1, parts[0]); // DD/MM/YYYY
+          } else {
+            dateObj = new Date(d);
+          }
+          return { raw: d, time: dateObj && !isNaN(dateObj.getTime()) ? dateObj.getTime() : null };
+        }).filter(item => item.time !== null);
+
+        if (parsed.length > 0) {
+          parsed.sort((a, b) => a.time - b.time);
+          startDate = parsed[0].raw;
+          endDate = parsed[parsed.length - 1].raw;
+        }
       }
     }
 
+    // Fallback to page filter dates if extracted row dates are null
+    if (!startDate) startDate = res.filterStartDate || null;
+    if (!endDate) endDate = res.filterEndDate || null;
+
+    const generate6CharId = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let result = '';
+      for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
+
     const logPayload = {
+      id: generate6CharId(),
       agent_id: res.selectedAgentId || null,
       agent_name: res.selectedAgentName || null,
       status: status,
@@ -412,7 +443,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     };
     syncStateToStorage();
     if (uploadState.currentIndex < uploadState.total) {
-      logSyncToSupabase('STARTED', uploadState.total, uploadState.uploaded, null);
       startUploadLoop();
     }
     else sendUpdateToContent('UPLOAD_COMPLETE', { total: uploadState.total, uploaded: uploadState.uploaded, preChecked: true });
