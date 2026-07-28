@@ -443,12 +443,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const timestamp = Date.now();
     let url = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=check_auth&extId=' + message.payload.extId + '&t=' + timestamp;
     if (message.payload.email) url += '&email=' + encodeURIComponent(message.payload.email);
-    fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message }));
+    fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message, message: 'Network / Connection Error. Please try again.' }));
     return true;
   }
   else if (message.type === 'VERIFY_USER_OTP') {
     const url = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=verify_user_otp&extId=' + message.payload.extId + '&otp=' + message.payload.otp;
     fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+  else if (message.type === 'REOPEN_LOGIN_TAB') {
+    const loginUrl = 'https://faveo.careinsurance.com/NewFaveo/#auth/login';
+    const targetTabId = sender.tab ? sender.tab.id : null;
+    chrome.tabs.create({ url: loginUrl }, function() {
+      if (targetTabId) {
+        chrome.tabs.remove(targetTabId);
+      }
+    });
+    sendResponse({ success: true });
     return true;
   }
   else if (message.type === 'SET_MASTER_MODE') {

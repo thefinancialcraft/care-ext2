@@ -274,9 +274,11 @@
             };
         };
 
-        var showLoginView = function(extId) {
+        var showLoginView = function(extId, errorMsg) {
             header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-lock" style="color:#ffb300; font-size:18px;"></i><h3 class="fav-login-title">Extension Login</h3></div>';
             
+            var errHtml = errorMsg ? '<div style="background:rgba(244,67,54,0.15); border:1px solid #f44336; color:#f44336; border-radius:8px; padding:8px 12px; font-size:11px; text-align:center; margin-bottom:10px; display:flex; align-items:center; justify-content:center; gap:6px;"><i class="fi fi-rr-exclamation" style="font-size:14px;"></i><span>' + errorMsg + '</span></div>' : '';
+
             chrome.storage.local.get(['favUserProfile', 'is_admin', 'is_master_extension', 'is_autopilot_active'], function(res) {
                 var profile = res.favUserProfile;
                 
@@ -292,6 +294,7 @@
                     // 👤 SHOW USER CARD
                     list.innerHTML = '\
                         <div style="display:flex; flex-direction:column; gap:10px; padding:10px;">\
+                            ' + errHtml + '\
                             <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-left:5px;">Welcome Back,</div>\
                             <button id="btnUserLogin" class="agent-card" style="border:1px solid #4caf50; background:rgba(76,175,80,0.05);">\
                                 <div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div>\
@@ -316,7 +319,6 @@
 
                     if (document.getElementById('btnAdminLogin')) {
                         document.getElementById('btnAdminLogin').onclick = function() {
-                             // This part was handled by setupAdminSecurity previously, I'll re-implement if needed or call it
                              if (typeof setupAdminSecurity === 'function') setupAdminSecurity();
                              else alert('Admin module loading...');
                         };
@@ -369,8 +371,29 @@
                                     }
                                 });
                             } else {
-                                alert(response.message || 'Still Pending Approval or Error.');
-                                showLoginView(extId);
+                                var msg = 'Login issue occurred. Please try again.';
+                                if (response) {
+                                    if (response.status === 'pending' || response.message === 'Waiting for Admin Approval') {
+                                        msg = '⏳ Approval Still Pending. Waiting for Admin.';
+                                    } else if (response.message) {
+                                        msg = response.message;
+                                    } else if (response.error) {
+                                        msg = 'Network Error: ' + response.error;
+                                    }
+                                } else if (chrome.runtime?.lastError) {
+                                    msg = 'Extension Error: ' + chrome.runtime.lastError.message;
+                                }
+
+                                showLoginView(extId, msg);
+                                
+                                chrome.storage.local.get(['is_master_extension'], function(mRes) {
+                                    if (mRes.is_master_extension) {
+                                        console.log('🤖 Master extension enabled & error detected. Reloading page in 3 seconds to retry login...');
+                                        setTimeout(function() {
+                                            window.location.reload();
+                                        }, 3000);
+                                    }
+                                });
                             }
                         });
                     };
@@ -385,6 +408,7 @@
                     // 📧 SHOW EMAIL INPUT (Original Login)
                     list.innerHTML = '\
                         <div style="display:flex; flex-direction:column; gap:12px; padding:10px;">\
+                            ' + errHtml + '\
                             <div style="background:rgba(255,255,255,0.04); padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); text-align:center;">\
                                 <div style="font-size:9px; opacity:0.5; margin-bottom:2px; color:#fff;">EXT ID</div>\
                                 <div style="font-size:16px; font-weight:700; color:#4caf50; letter-spacing:1px;">' + extId + '</div>\
@@ -407,7 +431,7 @@
 
                     document.getElementById('btnLoginSubmit').onclick = function() {
                         var email = document.getElementById('loginEmail').value.trim();
-                        if (!email) { alert('Please enter your email'); return; }
+                        if (!email) { showLoginView(extId, 'Please enter your email'); return; }
                         this.innerHTML = '<i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite;"></i> VERIFYING...';
                         
                         chrome.runtime.sendMessage({ 
@@ -450,8 +474,27 @@
                                     }
                                 });
                             } else {
-                                alert(response.message || 'Not authorized or mismatch.');
-                                showLoginView(extId);
+                                var msg = 'Not authorized or mismatch.';
+                                if (response) {
+                                    if (response.status === 'pending' || response.message === 'Waiting for Admin Approval') {
+                                        msg = '⏳ Approval Still Pending. Waiting for Admin.';
+                                    } else if (response.message) {
+                                        msg = response.message;
+                                    } else if (response.error) {
+                                        msg = 'Network Error: ' + response.error;
+                                    }
+                                } else if (chrome.runtime?.lastError) {
+                                    msg = 'Extension Error: ' + chrome.runtime.lastError.message;
+                                }
+                                showLoginView(extId, msg);
+                                chrome.storage.local.get(['is_master_extension'], function(mRes) {
+                                    if (mRes.is_master_extension) {
+                                        console.log('🤖 Master extension enabled & error detected. Reloading page in 3 seconds to retry login...');
+                                        setTimeout(function() {
+                                            window.location.reload();
+                                        }, 3000);
+                                    }
+                                });
                             }
                         });
                     };
@@ -1172,14 +1215,14 @@
                 };
             }
             
-            // ⏱️ 12-Second Redirect Watchdog Timer: If lportal page is not reached within 12s of OTP Received, reload & skip agent
+            // ⏱️ 10-Second Redirect Watchdog Timer: If lportal/dashboard page is not reached within 10s of OTP Received, close tab & open new login tab
             if (window.otpRedirectTimeout) clearTimeout(window.otpRedirectTimeout);
             window.otpRedirectTimeout = setTimeout(function() {
                 var currentUrl = window.location.href.toLowerCase();
-                console.log('🔍 Checking OTP Redirect state after 12s. Current URL:', currentUrl);
+                console.log('🔍 Checking OTP Redirect state after 10s. Current URL:', currentUrl);
 
-                if (!currentUrl.includes('lportal')) {
-                    console.warn('⚠️ OTP Received, but no redirection to lportal after 12 seconds! Reloading page & skipping agent...');
+                if (!currentUrl.includes('lportal') && !currentUrl.includes('dashboard')) {
+                    console.warn('⚠️ OTP Submitted, but no redirection to dashboard/lportal after 10 seconds! Closing tab and opening fresh login tab...');
                     
                     chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
                         if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents && r.autopilot_agents.length > 0) {
@@ -1189,17 +1232,17 @@
                                 autopilot_index: nextIndex,
                                 autopilot_next_login_time: Date.now() + delayMs
                             }, function() {
-                                console.log('⚠️ Autopilot: OTP Timeout. Skipped to agent index ' + nextIndex + '. Reloading...');
-                                window.location.reload();
+                                console.log('⚠️ Autopilot: OTP Timeout. Skipped to agent index ' + nextIndex + '. Reopening login tab...');
+                                chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
                             });
                         } else {
-                            window.location.reload();
+                            chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
                         }
                     });
                 } else {
-                    console.log('✅ OTP Redirect successful! Reached lportal page.');
+                    console.log('✅ OTP Redirect successful! Reached dashboard / lportal page.');
                 }
-            }, 12000);
+            }, 10000);
             
             // Extract digits robustly
             var rawData = typeof otpData === 'string' ? otpData : JSON.stringify(otpData);

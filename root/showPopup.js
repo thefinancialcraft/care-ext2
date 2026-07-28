@@ -2782,24 +2782,36 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
         const pauseExtractionWithError = (msg, page) => {
             console.error(`❌ Error: ${msg} (Page ${page})`);
-            const liveModal = document.getElementById('liveExtractModal');
-            if (liveModal) {
-               liveModal.style.background = '#ffebee';
-               liveModal.style.borderColor = '#ef5350';
-               liveModal.innerHTML = `
-                  <h4 style="margin:0 0 8px 0; color:#c62828; font-size:14px;">⚠️ Extraction Paused (Error)</h4>
-                  <div style="font-size:12px; color:#e67e22; font-weight:bold; line-height:1.5;">
-                     <p style="margin:0; color:#d32f2f;"><b>Error:</b> ${msg}</p>
-                     <p style="margin:4px 0 0 0;">Failed at Page: <b>${page}</b></p>
-                  </div>
-                  <div id="errBtns" style="margin-top:10px; display:flex; justify-content:center; gap:10px;">
-                    <button id="resumeExtBtn" style="padding:5px 10px; background:#f1c40f; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">▶ Resume</button>
-                  </div>
-               `;
-               document.getElementById('resumeExtBtn')?.addEventListener('click', () => {
-                   processNextPage();
-               });
-            }
+            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                const isMasterMode = res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused;
+                if (isMasterMode) {
+                    console.warn(`🤖 Master Extension Mode Active: Extraction Timeout on page ${page}. Uploading already extracted data (${accumulatedData.length} items), skipping pending pages & redirecting to dashboard...`);
+                    finishExtractionSuccess();
+                    setTimeout(() => {
+                        window.location.hash = '#/portal/dashboard';
+                    }, 2000);
+                } else {
+                    // 👤 Master Mode Disabled: Show Resume button modal for manual agent action
+                    const liveModal = document.getElementById('liveExtractModal');
+                    if (liveModal) {
+                       liveModal.style.background = '#ffebee';
+                       liveModal.style.borderColor = '#ef5350';
+                       liveModal.innerHTML = `
+                          <h4 style="margin:0 0 8px 0; color:#c62828; font-size:14px;">⚠️ Extraction Paused (Error)</h4>
+                          <div style="font-size:12px; color:#e67e22; font-weight:bold; line-height:1.5;">
+                             <p style="margin:0; color:#d32f2f;"><b>Error:</b> ${msg}</p>
+                             <p style="margin:4px 0 0 0;">Failed at Page: <b>${page}</b></p>
+                          </div>
+                          <div id="errBtns" style="margin-top:10px; display:flex; justify-content:center; gap:10px;">
+                            <button id="resumeExtBtn" style="padding:5px 10px; background:#f1c40f; color:#fff; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">▶ Resume</button>
+                          </div>
+                       `;
+                       document.getElementById('resumeExtBtn')?.addEventListener('click', () => {
+                           processNextPage();
+                       });
+                    }
+                }
+            });
         };
 
         function processNextPage() {
@@ -2859,8 +2871,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     };
 
 
-    // ====== SEND DATA TO APPSCRIPT ======
-    function sendDataToAppScript() {
+    // ====== SEND DATA TO SUPABASE ======
+    function sendDataToSupabase() {
 
       const buttonContainer = document.getElementById('secActBtn');
       if (buttonContainer) {
@@ -2913,7 +2925,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       }
 
       try {
-          console.log(`📡 Sending ${accumulatedData.length} records to background for API upload...`);
+          console.log(`📡 Sending ${accumulatedData.length} records to background for Supabase API upload...`);
           // Send data to background
           chrome.runtime.sendMessage({
             type: 'TABLE_DATA',
@@ -2923,6 +2935,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
           console.error('Failed to send message:', e);
       }
     }
+    const sendDataToAppScript = sendDataToSupabase;
     
     
 
