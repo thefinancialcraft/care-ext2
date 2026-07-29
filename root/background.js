@@ -370,6 +370,9 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
       return result;
     };
 
+    let totalPages = null;
+    let leadCount = totalRecords || (Array.isArray(tableDataToUpload) ? tableDataToUpload.length : 0);
+
     const logPayload = {
       id: generate6CharId(),
       agent_id: res.selectedAgentId || null,
@@ -377,6 +380,8 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
       status: status,
       total_records: totalRecords,
       uploaded_records: uploadedRecords,
+      lead_count: leadCount,
+      total_pages: res.lastExtractedPages || null,
       start_date: startDate,
       end_date: endDate,
       error_message: errorMessage,

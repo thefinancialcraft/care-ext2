@@ -2320,16 +2320,16 @@ const createCustomMonthActionUI = (monthsBack) => {
                 // Wait for page load/navigation and retry
                 setTimeout(attemptFetch, 2500); 
             } else {
-                // 🚀 3. Max attempts reached
-                console.error('❌ Failed to fetch agent name after 5 attempts.');
-                nameSpan.innerText = 'System User'; // Generic but not just 'Agent'
+                // 🚀 3. Max attempts reached (5 attempts failed)
+                console.warn('⚠️ Could not fetch specific agent name after 5 attempts. Using fallback: System User');
+                nameSpan.innerText = 'System User'; 
                 spinner.style.display = 'none';
                 buttonContainer.style.display = 'flex';
                 updateMinimizedStatus();
                 removeInitialOverlay();
                 isNameFetchComplete = true; // ✅ Max attempts hit, cleanup can start
                 
-                // Try to return to dashboard as a courtesy
+                // Return to dashboard gracefully without closing tab
                 const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');
                 dashboardLink?.click();
             }
@@ -2757,6 +2757,10 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             });
             
             processData(accumulatedData);
+            
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+               chrome.storage.local.set({ lastExtractedPages: currentPageNum });
+            }
             
             const liveModal = document.getElementById('liveExtractModal');
             if (liveModal) {
@@ -4165,20 +4169,27 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             Sorry for the inconvenience, this scanning process will take a short amount of time. 
                             Want to play a quick game while we work?
                         </p>
-                        <div style="display:flex; gap:15px; justify-content:center;">
+                        <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
                           <button id="start-ttt-btn" style="
-                              padding:12px 30px; border:none; border-radius:30px; 
+                              padding:10px 20px; border:none; border-radius:30px; 
                               background: linear-gradient(135deg, #00c853, #64dd17); 
-                              color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                              color:#fff; font-weight:bold; font-size:14px; cursor:pointer; 
                               box-shadow: 0 4px 15px rgba(0,200,83,0.3); transition: transform 0.2s;">
                               Play Tic-Tac-Toe
                           </button>
                           <button id="start-bird-btn" style="
-                              padding:12px 30px; border:none; border-radius:30px; 
+                              padding:10px 20px; border:none; border-radius:30px; 
                               background: linear-gradient(135deg, #ff9100, #ffab40); 
-                              color:#fff; font-weight:bold; font-size:16px; cursor:pointer; 
+                              color:#fff; font-weight:bold; font-size:14px; cursor:pointer; 
                               box-shadow: 0 4px 15px rgba(255,145,0,0.3); transition: transform 0.2s;">
                               Play Bird Game
+                          </button>
+                          <button id="start-cricket-btn" style="
+                              padding:10px 20px; border:none; border-radius:30px; 
+                              background: linear-gradient(135deg, #0288d1, #00bcd4); 
+                              color:#fff; font-weight:bold; font-size:14px; cursor:pointer; 
+                              box-shadow: 0 4px 15px rgba(2,136,209,0.3); transition: transform 0.2s;">
+                              🏏 Cricket Doodle
                           </button>
                         </div>
                     </div>
@@ -4223,6 +4234,34 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                                 Play Again
                             </button>
                             <button id="back-bird-btn" style="
+                                padding:8px 20px; border:none; border-radius:20px; 
+                                background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
+                                transition:background 0.2s;">
+                                Back to Menu
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="cricket-game-container" style="display:none; text-align:center; animation:zoomIn 0.5s ease;">
+                        <h3 id="cricket-status" style="margin-bottom:10px; color:#e3f2fd;">🏏 Tap/Click or Press SPACE to Swing Bat!</h3>
+                        <div style="position:relative; display:inline-block; background:#388e3c; border:4px solid #fff; border-radius:15px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.4);">
+                            <canvas id="cricket-canvas" width="560" height="360" style="display:block; cursor:pointer;"></canvas>
+                        </div>
+                        <div id="cricket-msg" style="margin-top:10px; font-weight:bold; min-height:30px; color:#fff; font-size:16px;">Score: 0 | Wickets: 0/3</div>
+                        <div style="display:flex; gap:10px; justify-content:center; margin-top:8px;">
+                            <button id="hit-cricket-btn" style="
+                                padding:8px 25px; border:none; border-radius:20px; 
+                                background:linear-gradient(135deg, #ffeb3b, #fbc02d); color:#333; font-weight:bold; cursor:pointer; font-size:14px;
+                                box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+                                🏏 HIT BAT
+                            </button>
+                            <button id="restart-cricket-btn" style="
+                                display:none; padding:8px 20px; border:none; border-radius:20px; 
+                                background:#fff; color:#0288d1; font-weight:bold; cursor:pointer; font-size:14px;
+                                box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+                                Play Again
+                            </button>
+                            <button id="back-cricket-btn" style="
                                 padding:8px 20px; border:none; border-radius:20px; 
                                 background:rgba(255,255,255,0.2); color:#fff; font-weight:bold; font-size:12px; cursor:pointer; 
                                 transition:background 0.2s;">
@@ -4303,6 +4342,378 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         overlay.querySelector('#bird-game-container').style.display = 'block';
                         playGameSound('X'); 
                         if (typeof startBirdGame === 'function') startBirdGame();
+                    });
+                }
+
+                // 🏏 NATIVE CANVAS CRICKET GAME MIMIC WITH FIELDERS & BIGGER GROUND
+                let cricketCanvas, cricketCtx;
+                let isCricketPlaying = false;
+                let cricketAnimationId = null;
+                let cricketScore = 0;
+                let cricketWickets = 0;
+                const maxWickets = 3;
+                let ball = { x: 280, y: 50, vx: 0, vy: 0, r: 6, state: 'bowling', speed: 3.8 };
+                let bat = { angle: 0, isSwinging: false, swingTimer: 0 };
+                let hitMessage = '';
+                let hitMessageTimer = 0;
+
+                // 🏃‍♂️ 6 Fielders with dynamic AI positioning
+                let fielders = [
+                    { x: 220, y: 90, base: { x: 220, y: 90 }, role: 'Mid-off', color: '#ffea00' },
+                    { x: 340, y: 90, base: { x: 340, y: 90 }, role: 'Mid-on', color: '#ffea00' },
+                    { x: 120, y: 190, base: { x: 120, y: 190 }, role: 'Cover', color: '#ffea00' },
+                    { x: 440, y: 190, base: { x: 440, y: 190 }, role: 'Point', color: '#ffea00' },
+                    { x: 170, y: 310, base: { x: 170, y: 310 }, role: 'Deep Fine', color: '#ffea00' },
+                    { x: 390, y: 310, base: { x: 390, y: 310 }, role: 'Long-on', color: '#ffea00' }
+                ];
+
+                const resetFielders = () => {
+                    fielders.forEach(f => {
+                        f.x = f.base.x;
+                        f.y = f.base.y;
+                    });
+                };
+
+                const drawPitch = () => {
+                    if (!cricketCtx) return;
+                    // Grass Background (Big Stadium Ground 560x360)
+                    cricketCtx.fillStyle = '#2e7d32';
+                    cricketCtx.fillRect(0, 0, 560, 360);
+
+                    // Outfield Grass Pattern Lines
+                    cricketCtx.fillStyle = '#388e3c';
+                    for (let i = 0; i < 560; i += 50) {
+                        cricketCtx.fillRect(i, 0, 25, 360);
+                    }
+
+                    // 30-Yard Circle
+                    cricketCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+                    cricketCtx.lineWidth = 2;
+                    cricketCtx.setLineDash([6, 6]);
+                    cricketCtx.beginPath();
+                    cricketCtx.ellipse(280, 180, 150, 110, 0, 0, Math.PI * 2);
+                    cricketCtx.stroke();
+                    cricketCtx.setLineDash([]); // Reset dash
+
+                    // Outer Boundary Rope
+                    cricketCtx.strokeStyle = '#fff';
+                    cricketCtx.lineWidth = 4;
+                    cricketCtx.beginPath();
+                    cricketCtx.ellipse(280, 180, 260, 165, 0, 0, Math.PI * 2);
+                    cricketCtx.stroke();
+
+                    // Pitch
+                    cricketCtx.fillStyle = '#d7ccc8';
+                    cricketCtx.fillRect(245, 40, 70, 280);
+
+                    // Crease Lines
+                    cricketCtx.strokeStyle = '#fff';
+                    cricketCtx.lineWidth = 2;
+                    // Bowler crease
+                    cricketCtx.beginPath();
+                    cricketCtx.moveTo(245, 60); cricketCtx.lineTo(315, 60);
+                    cricketCtx.stroke();
+                    // Batsman crease
+                    cricketCtx.beginPath();
+                    cricketCtx.moveTo(245, 290); cricketCtx.lineTo(315, 290);
+                    cricketCtx.stroke();
+
+                    // Stumps (Bowler end)
+                    cricketCtx.fillStyle = '#ffe082';
+                    cricketCtx.fillRect(274, 45, 3, 16);
+                    cricketCtx.fillRect(279, 45, 3, 16);
+                    cricketCtx.fillRect(284, 45, 3, 16);
+
+                    // Stumps (Batsman end)
+                    cricketCtx.fillStyle = '#ffe082';
+                    cricketCtx.fillRect(274, 295, 3, 20);
+                    cricketCtx.fillRect(279, 295, 3, 20);
+                    cricketCtx.fillRect(284, 295, 3, 20);
+
+                    // 🏃‍♂️ Draw Fielders
+                    fielders.forEach(f => {
+                        cricketCtx.save();
+                        cricketCtx.translate(f.x, f.y);
+                        // Fielder Head
+                        cricketCtx.fillStyle = '#ffe0b2';
+                        cricketCtx.beginPath(); cricketCtx.arc(0, -8, 6, 0, Math.PI * 2); cricketCtx.fill();
+                        // Fielder Cap
+                        cricketCtx.fillStyle = '#ff6f00';
+                        cricketCtx.beginPath(); cricketCtx.arc(0, -9, 6.5, Math.PI, Math.PI * 2); cricketCtx.fill();
+                        // Fielder Jersey
+                        cricketCtx.fillStyle = f.color;
+                        cricketCtx.fillRect(-5, -2, 10, 12);
+                        cricketCtx.restore();
+                    });
+
+                    // Bowler (Stickman at top)
+                    cricketCtx.save();
+                    cricketCtx.translate(280, 30);
+                    cricketCtx.fillStyle = '#ffe0b2';
+                    cricketCtx.beginPath(); cricketCtx.arc(0, -8, 6, 0, Math.PI * 2); cricketCtx.fill();
+                    cricketCtx.fillStyle = '#ffea00';
+                    cricketCtx.fillRect(-5, -2, 10, 12);
+                    cricketCtx.restore();
+
+                    // Batsman (Grasshopper/Player at bottom crease)
+                    cricketCtx.save();
+                    cricketCtx.translate(265, 280);
+                    // Body
+                    cricketCtx.fillStyle = '#ffb74d';
+                    cricketCtx.beginPath(); cricketCtx.arc(0, -10, 8, 0, Math.PI * 2); cricketCtx.fill(); // Head
+                    cricketCtx.fillStyle = '#0288d1';
+                    cricketCtx.fillRect(-5, -2, 10, 16); // Blue Jersey
+                    // Bat
+                    cricketCtx.save();
+                    cricketCtx.translate(5, 5);
+                    if (bat.isSwinging) {
+                        cricketCtx.rotate(-Math.PI / 3 + (bat.swingTimer / 10) * (Math.PI / 1.5));
+                    } else {
+                        cricketCtx.rotate(Math.PI / 6);
+                    }
+                    cricketCtx.fillStyle = '#8d6e63';
+                    cricketCtx.fillRect(0, -22, 6, 26); // Wooden Bat
+                    cricketCtx.restore();
+                    cricketCtx.restore();
+
+                    // Ball
+                    if (ball.state !== 'idle') {
+                        cricketCtx.fillStyle = '#d32f2f';
+                        cricketCtx.beginPath();
+                        cricketCtx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+                        cricketCtx.fill();
+                        cricketCtx.strokeStyle = '#fff';
+                        cricketCtx.lineWidth = 1;
+                        cricketCtx.stroke();
+                    }
+
+                    // Hit Message Popup on Canvas
+                    if (hitMessageTimer > 0) {
+                        cricketCtx.font = 'bold 24px sans-serif';
+                        cricketCtx.fillStyle = hitMessage.includes('OUT') || hitMessage.includes('CAUGHT') ? '#ff5252' : '#ffeb3b';
+                        cricketCtx.textAlign = 'center';
+                        cricketCtx.shadowColor = '#000';
+                        cricketCtx.shadowBlur = 8;
+                        cricketCtx.fillText(hitMessage, 280, 170);
+                        cricketCtx.shadowBlur = 0;
+                        hitMessageTimer--;
+                    }
+                };
+
+                const resetBall = () => {
+                    resetFielders();
+                    const speeds = [3.8, 4.5, 5.2, 6.0];
+                    const randomSpeed = speeds[Math.floor(Math.random() * speeds.length)];
+                    const targetX = 270 + Math.random() * 20;
+                    const dx = targetX - 280;
+                    const dy = 285 - 50;
+                    const steps = dy / randomSpeed;
+                    
+                    ball = {
+                        x: 280,
+                        y: 50,
+                        vx: dx / steps,
+                        vy: randomSpeed,
+                        r: 6,
+                        state: 'bowling',
+                        speed: randomSpeed
+                    };
+                };
+
+                const swingBat = () => {
+                    if (!isCricketPlaying || bat.isSwinging) return;
+                    bat.isSwinging = true;
+                    bat.swingTimer = 0;
+                    playGameSound('X');
+
+                    // Check Hit Collision
+                    if (ball.state === 'bowling' && ball.y >= 240 && ball.y <= 310) {
+                        playGameSound('win');
+                        ball.state = 'hit';
+
+                        // Calculate direction & hit velocity
+                        const angle = (Math.random() * 1.2 - 0.6) - Math.PI / 2;
+                        const accuracy = Math.abs(ball.y - 285);
+                        const hitPower = accuracy < 10 ? 11 : (accuracy < 20 ? 8.5 : 6);
+                        
+                        ball.vx = Math.cos(angle) * hitPower;
+                        ball.vy = Math.sin(angle) * hitPower;
+                    }
+                };
+
+                const runCricketLoop = () => {
+                    if (!isCricketPlaying) return;
+
+                    // Update Bat Swing
+                    if (bat.isSwinging) {
+                        bat.swingTimer++;
+                        if (bat.swingTimer > 10) bat.isSwinging = false;
+                    }
+
+                    // Update Ball
+                    if (ball.state === 'bowling') {
+                        ball.x += ball.vx;
+                        ball.y += ball.vy;
+
+                        // Missed Ball -> Wicket / Dot ball
+                        if (ball.y > 300) {
+                            if (Math.abs(ball.x - 280) < 18) {
+                                cricketWickets++;
+                                playGameSound('draw');
+                                hitMessage = 'BOWLED OUT! ❌';
+                                hitMessageTimer = 50;
+                                ball.state = 'out';
+                            } else {
+                                hitMessage = 'DOT BALL ⚪';
+                                hitMessageTimer = 35;
+                                ball.state = 'dot';
+                            }
+                        }
+                    } else if (ball.state === 'hit') {
+                        ball.x += ball.vx;
+                        ball.y += ball.vy;
+
+                        // 🏃‍♂️ Dynamic Fielder Movement towards hit ball
+                        let closestFielder = null;
+                        let minDist = 999;
+
+                        fielders.forEach(f => {
+                            const dx = ball.x - f.x;
+                            const dy = ball.y - f.y;
+                            const dist = Math.hypot(dx, dy);
+
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closestFielder = f;
+                            }
+
+                            // Chase ball if hit
+                            if (dist < 180) {
+                                f.x += (dx / dist) * 2.8;
+                                f.y += (dy / dist) * 2.8;
+                            }
+                        });
+
+                        // 🧤 Catch / Stop by Fielder
+                        if (closestFielder && minDist < 15) {
+                            if (Math.hypot(ball.vx, ball.vy) > 8.5 && Math.random() < 0.35) {
+                                // Caught Out!
+                                cricketWickets++;
+                                playGameSound('draw');
+                                hitMessage = `CAUGHT OUT by ${closestFielder.role}! 🤲❌`;
+                                hitMessageTimer = 50;
+                                ball.state = 'caught';
+                            } else {
+                                // Fielded for 1 or 2 Runs
+                                const runs = Math.hypot(ball.x - 280, ball.y - 285) > 180 ? 2 : 1;
+                                cricketScore += runs;
+                                hitMessage = `SAVED BY FIELD! ${runs} RUN${runs > 1 ? 'S' : ''} 🏃`;
+                                hitMessageTimer = 40;
+                                ball.state = 'fielded';
+                            }
+                        }
+
+                        // Boundary Check (Rope ellipse radius ~ 260, 165)
+                        const boundaryDist = Math.hypot((ball.x - 280) / 260, (ball.y - 180) / 165);
+                        if (boundaryDist >= 1.0 && ball.state === 'hit') {
+                            const runs = Math.hypot(ball.vx, ball.vy) > 9 ? 6 : 4;
+                            cricketScore += runs;
+                            hitMessage = runs === 6 ? 'SIXER! 🎆 OVER THE ROPE! 6 RUNS' : 'FOUR! ⚡ BOUNDARY! 4 RUNS';
+                            hitMessageTimer = 50;
+                            ball.state = 'boundary';
+                        }
+                    }
+
+                    // Check Out of Bounds or next ball reset
+                    if (ball.state !== 'bowling' && (ball.y < -30 || ball.y > 390 || ball.x < -30 || ball.x > 590 || ['out', 'dot', 'caught', 'fielded', 'boundary'].includes(ball.state))) {
+                        if (cricketWickets >= maxWickets) {
+                            endCricketGame();
+                            return;
+                        }
+                        if (hitMessageTimer <= 0) {
+                            resetBall();
+                        }
+                    }
+
+                    const msgEl = overlay.querySelector('#cricket-msg');
+                    if (msgEl) msgEl.innerText = `Score: ${cricketScore} | Wickets: ${cricketWickets}/${maxWickets}`;
+
+                    drawPitch();
+
+                    if (isCricketPlaying) {
+                        cricketAnimationId = requestAnimationFrame(runCricketLoop);
+                    }
+                };
+
+                const startCricketGame = () => {
+                    cricketCanvas = overlay.querySelector('#cricket-canvas');
+                    if (!cricketCanvas) return;
+                    cricketCtx = cricketCanvas.getContext('2d');
+                    isCricketPlaying = true;
+                    cricketScore = 0;
+                    cricketWickets = 0;
+                    hitMessage = 'GET READY! 🏏';
+                    hitMessageTimer = 40;
+                    
+                    const restartBtn = overlay.querySelector('#restart-cricket-btn');
+                    if (restartBtn) restartBtn.style.display = 'none';
+
+                    resetBall();
+                    if (cricketAnimationId) cancelAnimationFrame(cricketAnimationId);
+                    cricketAnimationId = requestAnimationFrame(runCricketLoop);
+                };
+
+                const endCricketGame = () => {
+                    isCricketPlaying = false;
+                    playGameSound('draw');
+                    const statusText = overlay.querySelector('#cricket-status');
+                    if (statusText) statusText.innerHTML = `<span style='color:#ff5252; font-weight:bold;'>MATCH OVER! Final Score: ${cricketScore}</span>`;
+                    
+                    const restartBtn = overlay.querySelector('#restart-cricket-btn');
+                    if (restartBtn) restartBtn.style.display = 'inline-block';
+                };
+
+                const handleCricketSwing = (e) => {
+                    if (e.type === 'keydown' && e.code !== 'Space') return;
+                    if (e.type === 'keydown') e.preventDefault();
+                    swingBat();
+                };
+
+                const startCricketBtn = overlay.querySelector('#start-cricket-btn');
+                if (startCricketBtn) {
+                    startCricketBtn.addEventListener('click', () => {
+                        overlay.querySelector('#ttt-intro-box').style.display = 'none';
+                        const cricketContainer = overlay.querySelector('#cricket-game-container');
+                        cricketContainer.style.display = 'block';
+                        playGameSound('X');
+                        window.addEventListener('keydown', handleCricketSwing);
+                        startCricketGame();
+                    });
+                }
+
+                const hitCricketBtn = overlay.querySelector('#hit-cricket-btn');
+                if (hitCricketBtn) {
+                    hitCricketBtn.addEventListener('click', swingBat);
+                }
+
+                const restartCricketBtn = overlay.querySelector('#restart-cricket-btn');
+                if (restartCricketBtn) {
+                    restartCricketBtn.addEventListener('click', () => {
+                        playGameSound('X');
+                        const statusText = overlay.querySelector('#cricket-status');
+                        if (statusText) statusText.innerText = '🏏 Tap/Click or Press SPACE to Swing Bat!';
+                        startCricketGame();
+                    });
+                }
+
+                const backCricketBtn = overlay.querySelector('#back-cricket-btn');
+                if (backCricketBtn) {
+                    backCricketBtn.addEventListener('click', () => {
+                        isCricketPlaying = false;
+                        window.removeEventListener('keydown', handleCricketSwing);
+                        if (cricketAnimationId) cancelAnimationFrame(cricketAnimationId);
+                        overlay.querySelector('#cricket-game-container').style.display = 'none';
+                        overlay.querySelector('#ttt-intro-box').style.display = 'block';
                     });
                 }
 
@@ -4976,14 +5387,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     // 🔔 Real-time listener for Master Mode toggle changes
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace === 'local') {
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
-                const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
-                if (isMasterMode) {
-                    createExtractionOverlay();
-                } else {
-                    removeExtractionOverlay(true); // Force remove when Master Mode turns OFF
-                }
-            });
+            if (changes.is_master_extension || changes.is_autopilot_active || changes.autopilot_paused) {
+                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                    const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
+                    if (isMasterMode) {
+                        createExtractionOverlay();
+                    } else {
+                        removeExtractionOverlay(true); // Force remove when Master Mode turns OFF
+                    }
+                });
+            }
         }
     });
 
