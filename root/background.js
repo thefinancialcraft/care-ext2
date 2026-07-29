@@ -661,7 +661,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // 🤖 Autopilot Tab Redirector Loop
 setInterval(() => {
-  chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+  chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'is_game_active'], (res) => {
+    if (res.is_game_active) return; // 🎮 Pause redirector when game overlay is active
     if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
       chrome.tabs.query({}, (tabs) => {
         const faveoTab = tabs.find(tab => tab.url && tab.url.includes('faveo.careinsurance.com'));
@@ -675,7 +676,7 @@ setInterval(() => {
           });
         } else {
           const url = faveoTab.url.toLowerCase();
-          if (!url.includes('newfaveo/#auth/login') && !url.includes('newfaveo/#/portal')) {
+          if (!url.includes('faveo.careinsurance.com/newfaveo')) {
             chrome.tabs.update(faveoTab.id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
           }
         }

@@ -4308,6 +4308,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (startBtn) {
                     startBtn.addEventListener('click', () => {
                         isGamePlaying = true;
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: true });
+                        }
                         overlay.querySelector('#ttt-intro-box').style.display = 'none';
                         overlay.querySelector('#ttt-game-container').style.display = 'block';
                         playGameSound('X'); 
@@ -4319,6 +4322,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (backTttBtn) {
                     backTttBtn.addEventListener('click', () => {
                         isGamePlaying = false;
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: false });
+                        }
                         overlay.querySelector('#ttt-game-container').style.display = 'none';
                         overlay.querySelector('#ttt-intro-box').style.display = 'block';
                     });
@@ -4328,6 +4334,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (backBirdBtn) {
                     backBirdBtn.addEventListener('click', () => {
                         isBirdPlaying = false;
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: false });
+                        }
                         window.removeEventListener('keydown', handleJump);
                         if (birdAnimationId) cancelAnimationFrame(birdAnimationId);
                         overlay.querySelector('#bird-game-container').style.display = 'none';
@@ -4338,6 +4347,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const startBirdBtn = overlay.querySelector('#start-bird-btn');
                 if (startBirdBtn) {
                     startBirdBtn.addEventListener('click', () => {
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: true });
+                        }
                         overlay.querySelector('#ttt-intro-box').style.display = 'none';
                         overlay.querySelector('#bird-game-container').style.display = 'block';
                         playGameSound('X'); 
@@ -4682,6 +4694,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const startCricketBtn = overlay.querySelector('#start-cricket-btn');
                 if (startCricketBtn) {
                     startCricketBtn.addEventListener('click', () => {
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: true });
+                        }
                         overlay.querySelector('#ttt-intro-box').style.display = 'none';
                         const cricketContainer = overlay.querySelector('#cricket-game-container');
                         cricketContainer.style.display = 'block';
@@ -4710,6 +4725,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (backCricketBtn) {
                     backCricketBtn.addEventListener('click', () => {
                         isCricketPlaying = false;
+                        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                            chrome.storage.local.set({ is_game_active: false });
+                        }
                         window.removeEventListener('keydown', handleCricketSwing);
                         if (cricketAnimationId) cancelAnimationFrame(cricketAnimationId);
                         overlay.querySelector('#cricket-game-container').style.display = 'none';
