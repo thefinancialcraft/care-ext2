@@ -5974,7 +5974,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
     // 🤖 Autopilot Watchdog and Manager Loop
     setInterval(() => {
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_last_active_time'], (res) => {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_last_active_time', 'autopilot_account_attempts', 'autopilot_index', 'autopilot_agents'], (res) => {
             if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
                 createExtractionOverlay();
                 const url = window.location.href;
