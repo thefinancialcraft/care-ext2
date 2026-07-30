@@ -2,6 +2,236 @@
     if (window.favLoginMonitorStarted) return;
     window.favLoginMonitorStarted = true;
 
+    var getKey = function(obj, pattern) {
+        if (!obj) return null;
+        var lowerPattern = pattern.toLowerCase();
+        var foundKey = Object.keys(obj).find(function(k) {
+            return k.toLowerCase().replace(/_/g, ' ') === lowerPattern || k.toLowerCase() === lowerPattern || k.toLowerCase().replace(/\s+/g, '_') === lowerPattern;
+        });
+        return foundKey ? obj[foundKey] : null;
+    };
+
+    var getOtpApiUrl = function(agent) {
+        if (!agent) return null;
+        return getKey(agent, 'agent_otp_finder') || 
+               getKey(agent, 'agent otp finder') || 
+               getKey(agent, 'otp finder') || 
+               getKey(agent, 'otp_finder') || 
+               getKey(agent, 'otp_url') || 
+               getKey(agent, 'otp url') ||
+               getKey(agent, 'otp');
+    };
+
+    var updateUIToOTPState = function(agent, list) {
+        var statusMsg = document.getElementById('favLoginStatus');
+        if (statusMsg) statusMsg.innerText = 'Waiting for OTP...';
+        
+        var loader = document.getElementById('favDancingDots');
+        if (loader) loader.style.display = 'flex';
+
+        var otpGroup = document.querySelector('.otp-group');
+        if (!otpGroup && list) {
+            otpGroup = document.createElement('div');
+            otpGroup.className = 'otp-group';
+            for (var i = 0; i < 6; i++) {
+                var box = document.createElement('div');
+                box.className = 'otp-box'; box.id = 'otp-box-' + i;
+                box.innerHTML = '<div class="otp-dot" id="otp-dot-'+i+'"></div>';
+                otpGroup.appendChild(box);
+            }
+            list.appendChild(otpGroup);
+        } else if (otpGroup) {
+            for (var j = 0; j < 6; j++) {
+                var b = document.getElementById('otp-box-' + j);
+                if (b) { b.innerHTML = '<div class="otp-dot"></div>'; b.style.background = ''; }
+            }
+        }
+
+        // 🚀 Trigger OTP Fetch for Agent
+        setTimeout(function() {
+            if (agent) {
+                fetchAndFillOtp(agent, 0); 
+            }
+        }, 2000);
+    };
+
+    var fetchAndFillOtp = function(agent, retryCount) {
+        retryCount = retryCount || 0;
+        var apiUrl = getOtpApiUrl(agent);
+        var statusMsg = document.getElementById('favLoginStatus');
+        
+        console.log('🔍 [favLogin] Fetching OTP for agent:', agent, 'API URL:', apiUrl);
+
+        if (apiUrl) {
+            if (statusMsg) statusMsg.innerText = 'Fetching OTP (Attempt ' + (retryCount + 1) + '/20)...';
+            
+            fetch(apiUrl)
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    console.log('📥 [favLogin] OTP API Response:', data);
+                    var otpDate = data.date ? new Date(data.date).getTime() : 0;
+                    var now = Date.now();
+                    var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 0;
+
+                    if (otpDate === 0 || diffMinutes <= 3) {
+                        displayOtpAndSubmit(data, agent);
+                    } else {
+                        if (retryCount < 20) {
+                            setTimeout(function() {
+                                fetchAndFillOtp(agent, retryCount + 1);
+                            }, 3000);
+                        } else {
+                            if (statusMsg) statusMsg.innerText = 'OTP request timed out. Retrying...';
+                            setTimeout(function() { fetchAndFillOtp(agent, 0); }, 3000);
+                        }
+                    }
+                })
+                .catch(function(err) {
+                    console.error('❌ OTP Fetch error:', err);
+                    if (retryCount < 20) {
+                        setTimeout(function() {
+                            fetchAndFillOtp(agent, retryCount + 1);
+                        }, 3000);
+                    }
+                });
+        } else {
+            console.error('❌ No agent_otp_finder URL found for agent:', agent);
+            if (statusMsg) statusMsg.innerText = 'No OTP Finder URL configured for this agent.';
+        }
+    };
+
+    var displayOtpAndSubmit = function(otpData, agent) {
+        console.log('🚀 [favLogin] OTP Received:', otpData);
+        var statusMsg = document.getElementById('favLoginStatus');
+        var timeStr = (new Date()).toTimeString().split(' ')[0];
+        
+        if (statusMsg) {
+            statusMsg.innerHTML = 'OTP Received! <i class="fi flex fi-rr-refresh reload-btn" id="favOtpReload"></i> <span style="font-size:9px; opacity:0.6; display:block;">at ' + timeStr + '</span>';
+            var reloadBtn = document.getElementById('favOtpReload');
+            if (reloadBtn) {
+                reloadBtn.onclick = function() { 
+                    this.style.transform = 'rotate(360deg)';
+                    updateUIToOTPState(agent, document.getElementById('agentListContainer')); 
+                };
+            }
+        }
+        
+        var currentUrl = window.location.href.toLowerCase();
+        if (!currentUrl.includes('resetpwd') && !currentUrl.includes('verifyotp')) {
+            if (window.otpRedirectTimeout) clearTimeout(window.otpRedirectTimeout);
+            window.otpRedirectTimeout = setTimeout(function() {
+                var checkUrl = window.location.href.toLowerCase();
+                if (!checkUrl.includes('lportal') && !checkUrl.includes('dashboard')) {
+                    console.warn('⚠️ OTP Submitted, but no redirection after 10s!');
+                }
+            }, 10000);
+        }
+
+        var loader = document.getElementById('favDancingDots');
+        if (loader) loader.style.display = 'none';
+
+        var otpVal = null;
+        if (typeof otpData === 'object' && otpData !== null) {
+            otpVal = otpData.otp || otpData.code || otpData.data || otpData.otp_code || otpData.otpNumber || otpData.otp_number;
+        }
+        if (!otpVal) otpVal = otpData;
+
+        var rawData = typeof otpVal === 'string' ? otpVal : (typeof otpVal === 'number' ? String(otpVal) : JSON.stringify(otpVal));
+        var otpArr = rawData.match(/\d/g);
+
+        if (otpArr && otpArr.length >= 6) {
+            var fullOtp = otpArr.slice(0, 6).join('');
+            console.log('✅ [favLogin] Extracted OTP Code:', fullOtp);
+
+            for (var i = 0; i < 6; i++) {
+                var box = document.getElementById('otp-box-' + i);
+                if (box) { 
+                    box.innerHTML = otpArr[i]; 
+                    box.style.color = '#fff';
+                    box.style.background = 'rgba(76, 175, 80, 0.2)'; 
+                }
+            }
+
+            var otpInput = document.getElementById('passwordOtp') || document.querySelector('input[formcontrolname="otp"]');
+            var submitBtn = document.getElementById('sign_in_btn') || document.getElementById('verfy_otp_btn') || document.querySelector('#verfy_otp_btn');
+
+            if (otpInput) {
+                otpInput.focus();
+                otpInput.value = fullOtp;
+                otpInput.dispatchEvent(new Event('input', { bubbles: true }));
+                otpInput.dispatchEvent(new Event('change', { bubbles: true }));
+                otpInput.dispatchEvent(new Event('keyup', { bubbles: true }));
+                otpInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                
+                setTimeout(function() { 
+                    if (!submitBtn) {
+                        submitBtn = document.getElementById('verfy_otp_btn') || document.querySelector('#verfy_otp_btn') || document.querySelector('.login-btn');
+                    }
+                    if (submitBtn && submitBtn.isConnected) { 
+                        console.log('🏁 Submitting OTP to button:', submitBtn);
+                        submitBtn.disabled = false;
+                        submitBtn.removeAttribute('disabled');
+                        submitBtn.click(); 
+                    } 
+                }, 800);
+            }
+        } else {
+            console.error('❌ [favLogin] OTP not ready / invalid length:', otpArr);
+            if (statusMsg) { statusMsg.innerText = 'OTP not ready. Re-fetching latest OTP (1/5)...'; }
+
+            // 🔁 Retry fetch 5 times before resending
+            var retryFetchOtp = function(attemptsLeft) {
+                if (attemptsLeft <= 0) {
+                    console.log('🔄 [favLogin] All re-fetch attempts done. Clicking Resend OTP...');
+                    if (statusMsg) { statusMsg.innerText = 'No valid OTP found. Resending OTP...'; statusMsg.style.color = '#ff9800'; }
+                    var resendLink = document.querySelector('.unlock a') ||
+                                     document.querySelector('#resend_otp_btn') ||
+                                     Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                         return (el.innerText || '').toLowerCase().includes('resend');
+                                     });
+                    if (resendLink) {
+                        console.log('🔄 [favLogin] Resend OTP clicked.');
+                        resendLink.click();
+                    }
+                    setTimeout(function() {
+                        if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
+                        if (agent) fetchAndFillOtp(agent, 0);
+                    }, 3500);
+                    return;
+                }
+                if (statusMsg) statusMsg.innerText = 'Re-fetching latest OTP (attempt ' + (6 - attemptsLeft) + '/5)...';
+                var apiUrl = getOtpApiUrl(agent);
+                if (!apiUrl || !agent) { retryFetchOtp(0); return; }
+                fetch(apiUrl)
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var otpDate = data.date ? new Date(data.date).getTime() : 0;
+                        var now = Date.now();
+                        var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 999;
+                        if (otpDate !== 0 && diffMinutes <= 3) {
+                            console.log('✅ [favLogin] Fresh OTP fetched on retry! Submitting...');
+                            displayOtpAndSubmit(data, agent);
+                        } else {
+                            console.log('⏳ OTP not fresh yet. Retrying in 2s... (' + attemptsLeft + ' left)');
+                            setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 2000);
+                        }
+                    })
+                    .catch(function() {
+                        setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 2000);
+                    });
+            };
+
+            retryFetchOtp(5);
+        }
+    };
+
+    var showGlobalError = function(msg) {
+        var listContainer = document.getElementById('agentListContainer');
+        if (listContainer) {
+            listContainer.innerHTML = '<div style="color:#ff5252; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">' + (msg || 'Something went wrong, try again') + '</div>';
+        }
+    };
+
     var loadModernIcons = function() {
         var href = 'https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css';
         if (!document.querySelector('link[href="' + href + '"]')) {
@@ -92,6 +322,7 @@
                     var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                     chrome.storage.local.set({
                         autopilot_index: nextIndex,
+                        autopilot_account_attempts: 0,
                         autopilot_next_login_time: Date.now() + delayMs
                     }, function() {
                         console.log('🤖 Autopilot Error handler: Reloading page to try next agent index ' + nextIndex + '...');
@@ -204,7 +435,13 @@
                 } else {
                     chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
                         if (response && response.success) renderAgents(response.agents);
-                        else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
+                        else {
+                            list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline - Reopening Tab...</div>';
+                            console.warn('⚠️ Offline status detected in login popup! Reopening fresh login tab...');
+                            setTimeout(function() {
+                                chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
+                            }, 2000);
+                        }
                     });
                 }
             });
@@ -645,29 +882,8 @@
         };
 
         var openAdminWorkflow = function(list, originalAgents) {
-            console.log('👑 [UI] Admin Workflow Started');
-            list.innerHTML = '';
-            var header = document.createElement('div');
-            header.className = 'agent-card'; header.style.borderColor = '#f44336'; header.style.cursor = 'default';
-            header.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-shield-check"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">Admin Authentication</div><div style="font-size:10px; opacity:0.5;">Sending OTP to Master Email...</div></div>';
-            list.appendChild(header);
-
-            var loader = document.createElement('div'); loader.className = 'dancing-dots';
-            loader.innerHTML = '<div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div><div class="dot" style="background:#f44336;"></div>';
-            list.appendChild(loader);
-
-            // 📡 Request OTP from background
-            console.log('📡 [UI] Requesting OTP...');
-            chrome.runtime.sendMessage({ type: 'SEND_ADMIN_OTP' }, function(response) {
-                console.log('📥 [UI] OTP Response Received:', response);
-                if (response && response.success) {
-                    showAdminOTPInput(list, originalAgents);
-                } else {
-                    var errorMsg = (response && response.message) ? response.message : 'Check your internet or Apps Script deployment.';
-                    console.error('❌ [UI] OTP Send Failed:', errorMsg);
-                    showGlobalError('Failed: ' + errorMsg);
-                }
-            });
+            console.log('👑 [UI] Admin Workflow Started - Admin OTP Bypassed!');
+            showAdminPanel(list, originalAgents);
         };
 
         var showAdminOTPInput = function(list, originalAgents) {
@@ -790,19 +1006,19 @@
             list.innerHTML = '';
             var panelHeader = document.createElement('div');
             panelHeader.style.cssText = 'padding:10px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:10px;';
-            panelHeader.innerHTML = '<i class="fi flex fi-rr-shield-check" style="color:#f44336; font-size:18px;"></i><div style="font-size:14px; font-weight:700;">ADMIN CONTROL CENTER</div>';
+            panelHeader.innerHTML = '<i class="fi flex fi-rr-shield-check" style="color:#f44336; font-size:18px;"></i><div style="text-align:left;"><div style="font-size:14px; font-weight:700;">ADMIN CONTROL CENTER</div><div style="font-size:9px; opacity:0.6;">System & Security Management</div></div>';
             
             var backBtn = document.createElement('i');
             backBtn.className = 'fi flex fi-rr-arrow-small-left';
-            backBtn.style.cssText = 'margin-left:auto; cursor:pointer; opacity:0.6;';
+            backBtn.style.cssText = 'margin-left:auto; cursor:pointer; opacity:0.6; font-size:18px;';
             backBtn.onclick = function() { renderAgents(originalAgents); };
             panelHeader.appendChild(backBtn);
             list.appendChild(panelHeader);
 
             // 👑 Master Toggle Box
             var masterToggleContainer = document.createElement('div');
-            masterToggleContainer.style.cssText = 'padding:10px; display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.05); border-radius:8px; margin:10px; border:1px solid rgba(255,255,255,0.1);';
-            masterToggleContainer.innerHTML = '<div><div style="font-size:12px; font-weight:700; color:#ff9800;">Master Autopilot Mode</div><div style="font-size:9px; opacity:0.6; margin-top:2px;">Sequentially runs all agents in 2m range</div></div>';
+            masterToggleContainer.style.cssText = 'padding:10px; display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.05); border-radius:8px; margin:5px 0 10px 0; border:1px solid rgba(255,255,255,0.1);';
+            masterToggleContainer.innerHTML = '<div><div style="font-size:12px; font-weight:700; color:#ff9800;">Master Autopilot Mode</div><div style="font-size:9px; opacity:0.6; margin-top:2px;">Sequentially runs all agents</div></div>';
             
             var toggleSwitch = document.createElement('input');
             toggleSwitch.type = 'checkbox';
@@ -822,6 +1038,60 @@
             masterToggleContainer.appendChild(toggleSwitch);
             list.appendChild(masterToggleContainer);
 
+            // 🔑 RESET PASSWORD CARD (For Admin)
+            var resetPassCard = document.createElement('button');
+            resetPassCard.className = 'agent-card';
+            resetPassCard.style.cssText = 'background:rgba(244,67,54,0.15); border:1px solid rgba(244,67,54,0.4); margin-bottom:8px;';
+            resetPassCard.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-key"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:700; color:#fff;">RESET AGENT PASSWORD</div><div style="font-size:10px; opacity:0.7;">Select an Agent to Reset Password</div></div><i class="fi fi-rr-angle-small-right" style="margin-left:auto; opacity:0.6;"></i>';
+            resetPassCard.onclick = function() {
+                openAdminResetPasswordView(list, originalAgents);
+            };
+            list.appendChild(resetPassCard);
+        };
+
+        var openAdminResetPasswordView = function(list, originalAgents) {
+            list.innerHTML = '';
+            var header = document.createElement('div');
+            header.className = 'agent-card'; header.style.borderColor = '#f44336'; header.style.cursor = 'default';
+            header.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-key"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">Reset Password</div><div style="font-size:10px; opacity:0.5;">Select Agent Profile</div></div>';
+            list.appendChild(header);
+
+            if (!originalAgents || originalAgents.length === 0) {
+                var noAgentMsg = document.createElement('div');
+                noAgentMsg.style.cssText = 'color:rgba(255,255,255,0.5); font-size:12px; text-align:center; padding:15px;';
+                noAgentMsg.innerText = 'No agent profiles found.';
+                list.appendChild(noAgentMsg);
+            } else {
+                originalAgents.forEach(function(agent, index) {
+                    var aName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Unknown';
+                    var aId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '--';
+                    
+                    var card = document.createElement('button');
+                    card.className = 'agent-card';
+                    card.style.cssText = 'margin-top:6px; border:1px solid rgba(244,67,54,0.2);';
+                    card.innerHTML = '<div class="agent-icon-box" style="background:#f44336;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div><div class="key-badge" style="background:#f44336; color:#fff;">RESET</div>';
+                    
+                    card.onclick = function() {
+                        chrome.storage.local.set({ 
+                            favPendingResetId: aId, 
+                            favPendingResetAgent: agent,
+                            favPendingResetName: aName 
+                        }, function() {
+                            list.innerHTML = '<div style="color:#4caf50; font-size:13px; font-weight:bold; padding:20px; text-align:center;"><i class="fi flex fi-rr-spinner-alt" style="animation:rotate 1s linear infinite; margin:0 auto 10px auto; font-size:20px;"></i>Opening Reset Page...</div>';
+                            setTimeout(function() {
+                                window.location.hash = '#/auth/resetpwd';
+                            }, 500);
+                        });
+                    };
+                    list.appendChild(card);
+                });
+            }
+
+            var backBtn = document.createElement('button');
+            backBtn.className = 'agent-card'; backBtn.style.marginTop = '10px'; backBtn.style.opacity = '0.6'; backBtn.style.background = 'transparent';
+            backBtn.innerHTML = '<i class="fi flex fi-rr-arrow-small-left"></i> <div style="font-size:11px;">Back to Admin Panel</div>';
+            backBtn.onclick = function() { showAdminPanel(list, originalAgents); };
+            list.appendChild(backBtn);
         };
 
         var renderAdminUserCard = function(list, user, type) {
@@ -1001,9 +1271,29 @@
             var passInput = document.getElementById('passwordOtp');
             var loginBtn = document.getElementById('sign_in_btn');
             if (userInput && passInput) {
-                userInput.value = aId; passInput.value = getKey(agent, 'agent password') || getKey(agent, 'agent_password') || '';
-                userInput.dispatchEvent(new Event('input', { bubbles: true })); passInput.dispatchEvent(new Event('input', { bubbles: true }));
-                setTimeout(function() { if (loginBtn) { loginBtn.disabled = false; loginBtn.click(); } }, 500);
+                var passVal = getKey(agent, 'agent password') || getKey(agent, 'agent_password') || '';
+                
+                userInput.focus();
+                userInput.value = aId;
+                userInput.dispatchEvent(new Event('input', { bubbles: true }));
+                userInput.dispatchEvent(new Event('change', { bubbles: true }));
+                userInput.dispatchEvent(new Event('keyup', { bubbles: true }));
+                userInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                passInput.focus();
+                passInput.value = passVal;
+                passInput.dispatchEvent(new Event('input', { bubbles: true }));
+                passInput.dispatchEvent(new Event('change', { bubbles: true }));
+                passInput.dispatchEvent(new Event('keyup', { bubbles: true }));
+                passInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                setTimeout(function() { 
+                    if (loginBtn && loginBtn.isConnected) { 
+                        loginBtn.disabled = false; 
+                        loginBtn.removeAttribute('disabled');
+                        loginBtn.click(); 
+                    } 
+                }, 600);
             }
             startPageObserver(agent, list);
         };
@@ -1025,17 +1315,68 @@
                         if (statusMsg) { statusMsg.innerText = 'FILL CORRECT DETAILS'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                    } else if (txt.includes('UserId is blocked') || txt.includes('maximum login attempt limit')) {
-                        if (statusMsg) { statusMsg.innerText = 'NEED TO RESET PASSWORD'; statusMsg.style.color = '#ffb300'; }
+                    } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count') || txt.includes('UserId is blocked') || txt.includes('maximum login attempt limit')) {
+                        if (statusMsg) { statusMsg.innerText = 'MAX OTP LIMIT REACHED'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                    } else if (txt.includes('Valid otp Number') || txt.includes('Valid OTP') || txt.includes('invalid otp')) {
-                        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Reloading...'; statusMsg.style.color = '#ff5252'; }
+
+                        showGlobalError('You have reached maximum OTP generation count limit');
+                        setTimeout(function() {
+                            window.location.hash = '#/auth/login';
+                        }, 3000);
+                    } else if (txt.includes('Valid otp Number') || txt.includes('Valid OTP') || txt.includes('invalid otp') || txt.includes('Invalid OTP')) {
+                        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Re-fetching latest OTP first...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                        // 🔄 Force reload page on invalid OTP
-                        console.log('⚠️ Invalid OTP detected! Force reloading page in 2 seconds...');
-                        setTimeout(function() { window.location.reload(); }, 2000);
+
+                        console.log('⚠️ Invalid OTP error on page! Will retry fetch 4-5x before resending...');
+
+                        chrome.storage.local.get(['favPendingResetAgent'], function(r) {
+                            var agentForRetry = r.favPendingResetAgent;
+                            if (!agentForRetry) return;
+
+                            var retryFetchBeforeResend = function(attemptsLeft) {
+                                if (attemptsLeft <= 0) {
+                                    // All retries exhausted — now resend OTP
+                                    console.log('🔄 [favLogin] All re-fetch attempts failed. Clicking Resend OTP now...');
+                                    if (statusMsg) { statusMsg.innerText = 'No new OTP found. Resending OTP...'; statusMsg.style.color = '#ff9800'; }
+                                    var resendBtnEl = document.querySelector('.unlock a') ||
+                                                      document.querySelector('#resend_otp_btn') ||
+                                                      Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                                          return (el.innerText || '').toLowerCase().includes('resend');
+                                                      });
+                                    if (resendBtnEl) { resendBtnEl.click(); }
+                                    setTimeout(function() {
+                                        if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
+                                        fetchAndFillOtp(agentForRetry, 0);
+                                    }, 3500);
+                                    return;
+                                }
+                                // Try fetching latest OTP
+                                if (statusMsg) statusMsg.innerText = 'Re-fetching OTP (attempt ' + (6 - attemptsLeft) + '/5)...';
+                                var apiUrl = getOtpApiUrl(agentForRetry);
+                                if (!apiUrl) { retryFetchBeforeResend(0); return; }
+                                fetch(apiUrl)
+                                    .then(function(res) { return res.json(); })
+                                    .then(function(data) {
+                                        var otpDate = data.date ? new Date(data.date).getTime() : 0;
+                                        var now = Date.now();
+                                        var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 999;
+                                        if (otpDate !== 0 && diffMinutes <= 3) {
+                                            console.log('✅ [favLogin] Fresh OTP found on retry! Submitting...');
+                                            displayOtpAndSubmit(data, agentForRetry);
+                                        } else {
+                                            console.log('⏳ OTP not fresh yet. Retrying in 2s... (' + attemptsLeft + ' attempts left)');
+                                            setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 2000);
+                                        }
+                                    })
+                                    .catch(function() {
+                                        setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 2000);
+                                    });
+                            };
+
+                            retryFetchBeforeResend(5);
+                        });
                     } else if (txt.includes('Something went wrong') || txt.includes('please try again')) {
                         if (statusMsg) { statusMsg.innerText = 'ERROR - Reloading...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
@@ -1084,113 +1425,6 @@
             observer.observe(document.body, { childList: true, subtree: true });
         };
 
-        var updateUIToOTPState = function(agent, list) {
-            var statusMsg = document.getElementById('favLoginStatus');
-            if (statusMsg) statusMsg.innerText = 'Sign-in confirmed. Waiting for OTP...';
-            
-            var loader = document.getElementById('favDancingDots');
-            if (loader) loader.style.display = 'flex'; // Ensure dots dance while waiting
-
-            // Ensure singleton OTP Group
-            var otpGroup = document.querySelector('.otp-group');
-            if (!otpGroup) {
-                otpGroup = document.createElement('div');
-                otpGroup.className = 'otp-group';
-                for (var i = 0; i < 6; i++) {
-                    var box = document.createElement('div');
-                    box.className = 'otp-box'; box.id = 'otp-box-' + i;
-                    box.innerHTML = '<div class="otp-dot" id="otp-dot-'+i+'"></div>';
-                    otpGroup.appendChild(box);
-                }
-                list.appendChild(otpGroup);
-            } else {
-                // Reset to dots if exists
-                for (var j = 0; j < 6; j++) {
-                    var b = document.getElementById('otp-box-' + j);
-                    if (b) b.innerHTML = '<div class="otp-dot"></div>'; b.style.background = '';
-                }
-            }
-
-            // [UPDATE] 3-5s gap before first OTP request
-            var delay = 3000 + Math.floor(Math.random() * 2000);
-            setTimeout(function() {
-                fetchAndFillOtp(agent, 0); 
-            }, delay);
-        };
-
-        var fetchAndFillOtp = function(agent, retryCount) {
-            retryCount = retryCount || 0;
-            var apiUrl = getKey(agent, 'agent_otp_finder');
-            var statusMsg = document.getElementById('favLoginStatus');
-            
-            if (apiUrl) {
-                if (statusMsg) statusMsg.innerText = (retryCount < 90 ? 'Fetching OTP (' + (retryCount+1) + '/3)...' : 'Fetching latest OTP...');
-                
-                fetch(apiUrl)
-                    .then(function(res) { return res.json(); })
-                    .then(function(data) {
-                        var otpDate = data.date ? new Date(data.date).getTime() : 0;
-                        var now = Date.now();
-                        var diffMinutes = (now - otpDate) / (1000 * 60);
-
-                        // If OTP is fresh (within 2 mins)
-                        if (otpDate > 0 && diffMinutes <= 2) {
-                            displayOtpAndSubmit(data, agent);
-                        } else {
-                            // OTP is old or date missing
-                            if (retryCount < 2) {
-                                setTimeout(function() {
-                                    fetchAndFillOtp(agent, retryCount + 1);
-                                }, 4000); // 4s gap between retries
-                            } else if (retryCount === 2) {
-                                // 3 attempts failed (0,1,2), click Resend
-                                var resendBtn = Array.from(document.querySelectorAll('.unlock a')).find(function(a) { 
-                                    return a.innerText.toLowerCase().includes('resend otp'); 
-                                });
-                                
-                                if (resendBtn) {
-                                    if (statusMsg) statusMsg.innerText = 'OTP expired. Clicking Resend...';
-                                    resendBtn.click();
-                                    setTimeout(function() {
-                                        fetchAndFillOtp(agent, 99); // Final attempt after resend
-                                    }, 5000);
-                                } else {
-                                    showGlobalError('OTP Not generated. Try again');
-                                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
-                                        if (res.is_master_extension && res.is_autopilot_active) {
-                                            setTimeout(handleAutopilotError, 3000);
-                                        }
-                                    });
-                                }
-                            } else {
-                                // Final check after Resend also failed
-                                showGlobalError('OTP Not generated after Resend');
-                                chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
-                                    if (res.is_master_extension && res.is_autopilot_active) {
-                                        setTimeout(handleAutopilotError, 3000);
-                                    }
-                                });
-                            }
-                        }
-                    })
-                    .catch(function(e) { 
-                        console.error('Fetch Error:', e);
-                        if (statusMsg) {
-                            statusMsg.innerText = 'Fetch Failed.';
-                            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active'], function(res) {
-                                if (res.is_master_extension && res.is_autopilot_active) {
-                                    setTimeout(handleAutopilotError, 3000);
-                                } else {
-                                    setTimeout(function() {
-                                        showGlobalError('Network Error. Please try again.');
-                                    }, 1000);
-                                }
-                            });
-                        }
-                    });
-            }
-        };
-
         var showGlobalError = function(msg) {
             list.innerHTML = '<div style="color:#ff5252; padding:30px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">' + (msg || 'Something went wrong, try again') + '</div>';
             
@@ -1198,91 +1432,15 @@
                 list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Reloading agents...</div>';
                 chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
                     if (response && response.success) renderAgents(response.agents);
-                    else list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline</div>';
+                    else {
+                        list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline - Reopening Tab...</div>';
+                        console.warn('⚠️ Offline status detected in global error fallback! Reopening fresh login tab...');
+                        setTimeout(function() {
+                            chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
+                        }, 2000);
+                    }
                 });
             }, 2000);
-        };
-
-        var displayOtpAndSubmit = function(otpData, agent) {
-            console.log('🚀 [favLogin] OTP Received:', otpData);
-            var statusMsg = document.getElementById('favLoginStatus');
-            var timeStr = (new Date()).toTimeString().split(' ')[0];
-            
-            if (statusMsg) {
-                statusMsg.innerHTML = 'OTP Received! <i class="fi flex fi-rr-refresh reload-btn" id="favOtpReload"></i> <span style="font-size:9px; opacity:0.6; display:block;">at ' + timeStr + '</span>';
-                document.getElementById('favOtpReload').onclick = function() { 
-                    this.style.transform = 'rotate(360deg)';
-                    updateUIToOTPState(agent, document.getElementById('agentListContainer')); 
-                };
-            }
-            
-            // ⏱️ 10-Second Redirect Watchdog Timer: If lportal/dashboard page is not reached within 10s of OTP Received, close tab & open new login tab
-            if (window.otpRedirectTimeout) clearTimeout(window.otpRedirectTimeout);
-            window.otpRedirectTimeout = setTimeout(function() {
-                var currentUrl = window.location.href.toLowerCase();
-                console.log('🔍 Checking OTP Redirect state after 10s. Current URL:', currentUrl);
-
-                if (!currentUrl.includes('lportal') && !currentUrl.includes('dashboard')) {
-                    console.warn('⚠️ OTP Submitted, but no redirection to dashboard/lportal after 10 seconds! Closing tab and opening fresh login tab...');
-                    
-                    chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
-                        if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents && r.autopilot_agents.length > 0) {
-                            var nextIndex = (r.autopilot_index + 1) % r.autopilot_agents.length;
-                            var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
-                            chrome.storage.local.set({
-                                autopilot_index: nextIndex,
-                                autopilot_next_login_time: Date.now() + delayMs
-                            }, function() {
-                                console.log('⚠️ Autopilot: OTP Timeout. Skipped to agent index ' + nextIndex + '. Reopening login tab...');
-                                chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
-                            });
-                        } else {
-                            chrome.runtime.sendMessage({ type: 'REOPEN_LOGIN_TAB' });
-                        }
-                    });
-                } else {
-                    console.log('✅ OTP Redirect successful! Reached dashboard / lportal page.');
-                }
-            }, 10000);
-            
-            // Extract digits robustly
-            var rawData = typeof otpData === 'string' ? otpData : JSON.stringify(otpData);
-            var otpArr = rawData.match(/\d/g);
-
-            if (otpArr && otpArr.length >= 6) {
-                var fullOtp = otpArr.slice(0, 6).join('');
-                console.log('✅ [favLogin] Processing OTP:', fullOtp);
-
-                for (var i = 0; i < 6; i++) {
-                    var box = document.getElementById('otp-box-' + i);
-                    if (box) { 
-                        box.innerHTML = otpArr[i]; 
-                        box.style.color = '#fff';
-                        box.style.background = 'rgba(76, 175, 80, 0.2)'; 
-                    }
-                }
-
-                // 🎯 [Universal Selector] Try both Login and Reset Password fields
-                var otpInput = document.getElementById('passwordOtp') || document.querySelector('input[formcontrolname="otp"]');
-                var submitBtn = document.getElementById('sign_in_btn') || document.getElementById('verfy_otp_btn');
-
-                if (otpInput) {
-                    otpInput.value = fullOtp;
-                    otpInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    otpInput.dispatchEvent(new Event('change', { bubbles: true }));
-                    otpInput.dispatchEvent(new Event('blur', { bubbles: true }));
-                    
-                    setTimeout(function() { 
-                        if (submitBtn) { 
-                            console.log('🏁 Submitting OTP to:', submitBtn.id);
-                            submitBtn.disabled = false; submitBtn.click(); 
-                        } 
-                    }, 800);
-                }
-            } else {
-                console.error('❌ [favLogin] Invalid OTP Length:', otpArr);
-                if (statusMsg) statusMsg.innerText = 'Invalid OTP Received.';
-            }
         };
 
 
@@ -1304,41 +1462,277 @@
         var url = window.location.href;
         var isDashboard = url.indexOf('/portal/dashboard') !== -1;
         var isLoginPage = url.indexOf('auth/login') !== -1 || (url.indexOf('faveo') !== -1 && url.indexOf('/login') !== -1);
-        var isResetPage = url.indexOf('auth/resetpwd') !== -1;
+        var isVerifyOtpPage = url.indexOf('auth/verifyotp') !== -1;
+        var isChangePwdPage = url.indexOf('auth/changepwd') !== -1;
+        var isResetPage = url.indexOf('auth/resetpwd') !== -1 || isVerifyOtpPage || isChangePwdPage;
         var popup = document.getElementById('favLoginPopup');
  
-        // 🚀 NEW: Detect 'OTP sent successfully' on Reset Page
+        // 🚀 Detect Reset / Verify OTP state
         if (isResetPage) {
-            // Check for success message in DOM more robustly
-            var allDivs = document.querySelectorAll('div');
-            var msgDiv = null;
-            for (var i = 0; i < allDivs.length; i++) {
-                var d = allDivs[i];
-                if (d.innerText && d.innerText.includes('OTP sent successfully') && (d.style.color === 'green' || d.getAttribute('style')?.includes('color: green'))) {
-                    msgDiv = d;
+            var otpField = document.querySelector('input[formcontrolname="otp"]');
+            var verifyBtn = document.getElementById('verfy_otp_btn');
+            var isOtpPage = isVerifyOtpPage || otpField || verifyBtn;
+
+            var isAlreadyFetching = popup && popup.dataset && popup.dataset.otpFetchStarted === 'true';
+
+            if (isOtpPage && !isAlreadyFetching) {
+                console.log('✅ [favLogin] Reset/Verify OTP State Detected! Starting OTP Fetch...');
+                if (popup) popup.dataset.otpFetchStarted = 'true';
+                
+                chrome.storage.local.get(['favPendingResetAgent', 'favPendingResetId'], function(res) {
+                    var agent = res.favPendingResetAgent;
+                    var agentId = res.favPendingResetId;
+
+                    var startFetchForAgent = function(targetAgent) {
+                        if (!targetAgent) return;
+                        var listContainer = document.getElementById('agentListContainer');
+                        if (listContainer) {
+                             listContainer.innerHTML = ''; 
+                             var activeCard = document.createElement('div');
+                             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
+                             var aName = getKey(targetAgent, 'agent name') || getKey(targetAgent, 'agent_name') || 'Agent';
+                             var aId = getKey(targetAgent, 'agent id') || getKey(targetAgent, 'agent_id') || agentId || '--';
+                             activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>';
+                             listContainer.appendChild(activeCard);
+
+                             var statusMsg = document.createElement('div');
+                             statusMsg.id = 'favLoginStatus';
+                             statusMsg.style.cssText = 'color:rgba(255,255,255,0.6); font-size:12px; text-align:center; margin-top:15px;';
+                             statusMsg.innerText = 'Resetting Password. Waiting for OTP...';
+                             listContainer.appendChild(statusMsg);
+
+                             var loader = document.createElement('div');
+                             loader.id = 'favDancingDots';
+                             loader.className = 'dancing-dots';
+                             loader.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                             listContainer.appendChild(loader);
+
+                             updateUIToOTPState(targetAgent, listContainer);
+                        }
+                        fetchAndFillOtp(targetAgent, 0);
+                    };
+
+                    if (agent) {
+                        startFetchForAgent(agent);
+                    } else {
+                        chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
+                            if (response && response.success && response.agents && response.agents.length > 0) {
+                                var found = agentId ? response.agents.find(function(a) { return (getKey(a, 'agent id') || getKey(a, 'agent_id')) == agentId; }) : null;
+                                var target = found || response.agents[0];
+                                startFetchForAgent(target);
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        // 🚨 Active check for Max OTP Limit / "Invalid OTP" DOM error message on page
+        if (isResetPage) {
+            var allElements = document.querySelectorAll('div, span, p');
+            var isMaxLimitMsg = false;
+            for (var m = 0; m < allElements.length; m++) {
+                var elText = (allElements[m].innerText || allElements[m].textContent || '').toLowerCase();
+                if (elText.includes('reached maximum otp generation count limit') || elText.includes('maximum otp generation count limit') || elText.includes('maximum otp count')) {
+                    isMaxLimitMsg = true;
                     break;
                 }
             }
 
-            if (msgDiv && (!popup.dataset.waitingForResetOtp || popup.dataset.waitingForResetOtp === 'false')) {
-                console.log('✅ [favLogin] Reset OTP Sent Detected! Switching UI...');
-                popup.dataset.waitingForResetOtp = 'true'; // Prevent duplicate triggers
-                
-                chrome.storage.local.get(['favPendingResetAgent'], function(res) {
-                    if (res.favPendingResetAgent) {
-                        var listContainer = document.getElementById('agentListContainer');
-                        if (listContainer) {
-                             // Clear "Please wait..." state before switching to OTP
-                             listContainer.innerHTML = ''; 
-                             // Re-add header card
-                             var activeCard = document.createElement('div');
-                             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
-                             activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + (res.favPendingResetAgent.agent_name || 'Agent') + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + (res.favPendingResetAgent.agent_id || '--') + '</div></div>';
-                             listContainer.appendChild(activeCard);
-                             
-                             updateUIToOTPState(res.favPendingResetAgent, listContainer);
-                        }
+            if (isMaxLimitMsg) {
+                var isAlreadyHandlingMaxLimit = popup && popup.dataset && popup.dataset.handlingMaxLimit === 'true';
+                if (!isAlreadyHandlingMaxLimit) {
+                    if (popup) popup.dataset.handlingMaxLimit = 'true';
+                    console.warn('⚠️ [favLogin] Max OTP Generation Count Limit Reached! Redirecting to login page...');
+
+                    showGlobalError('You have reached maximum OTP generation count limit');
+                    setTimeout(function() {
+                        window.location.hash = '#/auth/login';
+                    }, 3000);
+                }
+            }
+
+            var errEl = document.querySelector('.error-message.text-center, .error-message, div.alert-danger');
+            if (errEl) {
+                var errText = (errEl.innerText || errEl.textContent || '').toLowerCase();
+                if (errText.includes('invalid otp') || errText.includes('valid otp')) {
+                    var isAlreadyHandlingInvalidOtp = popup && popup.dataset && popup.dataset.handlingInvalidOtp === 'true';
+                    if (!isAlreadyHandlingInvalidOtp) {
+                        if (popup) popup.dataset.handlingInvalidOtp = 'true';
+                        console.log('🚨 [favLogin] "Invalid OTP" error detected! Retrying fetch 4-5x before resending...');
+
+                        var statusMsg2 = document.getElementById('favLoginStatus');
+                        if (statusMsg2) { statusMsg2.innerText = 'Invalid OTP — Re-fetching latest OTP first...'; statusMsg2.style.color = '#ff5252'; }
+
+                        chrome.storage.local.get(['favPendingResetAgent'], function(res2) {
+                            var agentForRetry2 = res2.favPendingResetAgent;
+                            if (!agentForRetry2) { if (popup) popup.dataset.handlingInvalidOtp = 'false'; return; }
+
+                            var retryFetchBeforeResend2 = function(attemptsLeft2) {
+                                if (attemptsLeft2 <= 0) {
+                                    console.log('🔄 [favLogin] All re-fetch attempts done. Resending OTP now...');
+                                    if (statusMsg2) { statusMsg2.innerText = 'No new OTP. Resending OTP...'; statusMsg2.style.color = '#ff9800'; }
+                                    var resendBtnEl2 = document.querySelector('.unlock a') ||
+                                                       document.querySelector('#resend_otp_btn') ||
+                                                       Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                                           return (el.innerText || '').toLowerCase().includes('resend');
+                                                       });
+                                    if (resendBtnEl2) { resendBtnEl2.click(); }
+                                    setTimeout(function() {
+                                        if (statusMsg2) { statusMsg2.innerText = 'Fetching OTP after resend...'; statusMsg2.style.color = '#4fc3f7'; }
+                                        if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                        fetchAndFillOtp(agentForRetry2, 0);
+                                    }, 3500);
+                                    return;
+                                }
+                                if (statusMsg2) statusMsg2.innerText = 'Re-fetching latest OTP (attempt ' + (6 - attemptsLeft2) + '/5)...';
+                                var apiUrl2 = getOtpApiUrl(agentForRetry2);
+                                if (!apiUrl2) { retryFetchBeforeResend2(0); return; }
+                                fetch(apiUrl2)
+                                    .then(function(r2) { return r2.json(); })
+                                    .then(function(d2) {
+                                        var otpDate2 = d2.date ? new Date(d2.date).getTime() : 0;
+                                        var now2 = Date.now();
+                                        var diff2 = otpDate2 > 0 ? ((now2 - otpDate2) / (1000 * 60)) : 999;
+                                        if (otpDate2 !== 0 && diff2 <= 3) {
+                                            console.log('✅ [favLogin] Fresh OTP found on watcher retry!');
+                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                            displayOtpAndSubmit(d2, agentForRetry2);
+                                        } else {
+                                            setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 2000);
+                                        }
+                                    })
+                                    .catch(function() {
+                                        setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 2000);
+                                    });
+                            };
+
+                            retryFetchBeforeResend2(5);
+                        });
                     }
+                }
+            }
+
+            // 🏆 Active check for "Password changed successfully" DOM message
+            var successEl = document.querySelector('.success-message.text-center, .success-message, div.alert-success');
+            var successText = successEl ? (successEl.innerText || successEl.textContent || '') : '';
+            if (!successText) {
+                var allPageEls = document.querySelectorAll('div, span, p');
+                for (var s = 0; s < allPageEls.length; s++) {
+                    var t = (allPageEls[s].innerText || allPageEls[s].textContent || '').toLowerCase();
+                    if (t.includes('password changed successfully')) {
+                        successText = 'Password changed successfully!!';
+                        break;
+                    }
+                }
+            }
+
+            if (successText.toLowerCase().includes('password changed successfully')) {
+                var isAlreadyHandlingPwdSuccess = popup && popup.dataset && popup.dataset.handlingPwdSuccess === 'true';
+                if (!isAlreadyHandlingPwdSuccess) {
+                    if (popup) popup.dataset.handlingPwdSuccess = 'true';
+                    console.log('🎉 [favLogin] "Password changed successfully" detected! Resetting extension & redirecting to login...');
+
+                    chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword'], function(res) {
+                        if (res.favPendingResetId && res.favPendingResetNewPassword) {
+                            chrome.runtime.sendMessage({ 
+                                type: 'UPDATE_PASSWORD', 
+                                payload: { userId: res.favPendingResetId, newPassword: res.favPendingResetNewPassword } 
+                            }, function(resp) {
+                                console.log('📡 [favLogin] Google Sheet password updated:', resp);
+                                chrome.storage.local.set({ isAuthorized: false }, function() {
+                                    chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                                        console.log('🔄 [favLogin] Extension reset & reloading page!');
+                                        window.location.reload();
+                                    });
+                                });
+                            });
+                        }
+                    });
+
+                    var listContainer = document.getElementById('agentListContainer');
+                    if (listContainer) {
+                        listContainer.innerHTML = '<div style="color:#4caf50; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">Password changed successfully!!</div>';
+                    }
+
+                    setTimeout(function() {
+                        window.location.hash = '#/auth/login';
+                    }, 2500);
+                }
+            }
+
+            // 🔑 Detect Change Password Page state (input[formcontrolname="new_pwd"], input[formcontrolname="conf_pwd"], #cpwd_btn)
+            var newPwdInput = document.querySelector('input[formcontrolname="new_pwd"]');
+            var confPwdInput = document.querySelector('input[formcontrolname="conf_pwd"]');
+            var isChangePwdState = isChangePwdPage || (newPwdInput && confPwdInput);
+            var isChangePwdDone = popup && popup.dataset && popup.dataset.changePwdDone === 'true';
+
+            if (isChangePwdState && !isChangePwdDone) {
+                if (popup) popup.dataset.changePwdDone = 'true';
+                console.log('⚡ [favLogin] Change Password Page Detected! Filling New Password...');
+
+                chrome.storage.local.get(['favPendingResetAgent', 'favPendingResetId'], function(res) {
+                    var agent = res.favPendingResetAgent;
+                    var agentId = res.favPendingResetId;
+
+                    var currentPass = agent ? (getKey(agent, 'agent password') || getKey(agent, 'agent_password') || '') : '';
+                    currentPass = (currentPass || '').trim();
+
+                    // Password toggling logic:
+                    // If currentPass ends with '123456' or equals 'Ajay@123456' -> newPass = 'Ajay@12345'
+                    // If currentPass ends with '12345' or equals 'Ajay@12345' -> newPass = 'Ajay@123456'
+                    var newPass = 'Ajay@123456';
+                    if (currentPass === 'Ajay@123456' || currentPass.endsWith('123456')) {
+                        newPass = 'Ajay@12345';
+                    } else if (currentPass === 'Ajay@12345' || currentPass.endsWith('12345')) {
+                        newPass = 'Ajay@123456';
+                    } else {
+                        newPass = 'Ajay@123456';
+                    }
+
+                    console.log('🔑 [favLogin] Old Pass:', currentPass, '==> New Pass:', newPass, 'for Agent ID:', agentId);
+
+                    var statusMsg = document.getElementById('favLoginStatus');
+                    if (statusMsg) statusMsg.innerText = 'Setting New Password (' + newPass + ')...';
+
+                    var fillInputs = function() {
+                        var nInput = document.querySelector('input[formcontrolname="new_pwd"]');
+                        var cInput = document.querySelector('input[formcontrolname="conf_pwd"]');
+                        var cpwdBtn = document.getElementById('cpwd_btn') || document.querySelector('#cpwd_btn') || document.querySelector('.login-btn');
+
+                        if (nInput && cInput) {
+                            nInput.focus();
+                            nInput.value = newPass;
+                            nInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            nInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            nInput.dispatchEvent(new Event('keyup', { bubbles: true }));
+                            nInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                            cInput.focus();
+                            cInput.value = newPass;
+                            cInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            cInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            cInput.dispatchEvent(new Event('keyup', { bubbles: true }));
+                            cInput.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                            // Save pending reset password to storage and submit form
+                            chrome.storage.local.set({ favPendingResetNewPassword: newPass }, function() {
+                                setTimeout(function() {
+                                    if (!cpwdBtn) {
+                                        cpwdBtn = document.getElementById('cpwd_btn') || document.querySelector('#cpwd_btn') || document.querySelector('.login-btn');
+                                    }
+                                    if (cpwdBtn && cpwdBtn.isConnected) {
+                                        console.log('🏁 Submitting CHANGE PASSWORD form with newPass:', newPass);
+                                        cpwdBtn.disabled = false;
+                                        cpwdBtn.removeAttribute('disabled');
+                                        cpwdBtn.click();
+                                    }
+                                }, 800);
+                            });
+                        }
+                    };
+
+                    fillInputs();
                 });
             }
 
@@ -1353,16 +1747,19 @@
                         
                         if (idInput && genBtn) {
                             clearInterval(checkInterval);
+                            idInput.focus();
                             idInput.value = resetId;
                             idInput.dispatchEvent(new Event('input', { bubbles: true }));
                             idInput.dispatchEvent(new Event('change', { bubbles: true }));
                             idInput.dispatchEvent(new Event('blur', { bubbles: true }));
                             
                             setTimeout(function() {
-                                genBtn.disabled = false;
-                                genBtn.click();
-                                chrome.storage.local.remove(['favPendingResetId']); // 🧹 Cleanup
-                            }, 500);
+                                if (genBtn && genBtn.isConnected) {
+                                    genBtn.disabled = false;
+                                    genBtn.removeAttribute('disabled');
+                                    genBtn.click();
+                                }
+                            }, 600);
                         }
                     }, 500);
                     
@@ -1372,9 +1769,34 @@
             });
         }
 
-        // If URL changed and we are now on a login page, clear inputs immediately and with retries
+        // 🎯 If URL changed and we are now on Login page, check if password reset just completed!
         if (url !== lastObservedUrl) {
             if (isLoginPage) {
+                chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword'], function(res) {
+                    if (res.favPendingResetId && res.favPendingResetNewPassword) {
+                        var rId = res.favPendingResetId;
+                        var rPass = res.favPendingResetNewPassword;
+                        console.log('🎉 [favLogin] Password reset complete! Syncing new password to Google Sheet for:', rId);
+
+                        chrome.runtime.sendMessage({ 
+                            type: 'UPDATE_PASSWORD', 
+                            payload: { userId: rId, newPassword: rPass } 
+                        }, function(response) {
+                            console.log('📡 [favLogin] Google Sheet password updated:', response);
+                            chrome.storage.local.set({ isAuthorized: false }, function() {
+                                chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                                    console.log('🔄 [favLogin] Showing login popup and reloading page...');
+                                    var popupEl = document.getElementById('favLoginPopup');
+                                    if (popupEl) popupEl.remove();
+                                    createLoginPopup();
+                                    setTimeout(function() {
+                                        window.location.reload();
+                                    }, 1200);
+                                });
+                            });
+                        });
+                    }
+                });
                 var clearInputs = function() {
                     try {
                         document.querySelectorAll('input').forEach(function(input) {
@@ -1397,7 +1819,7 @@
 
         if (isDashboard && popup) {
             popup.remove();
-        } else if (isLoginPage && !popup) {
+        } else if ((isLoginPage || isResetPage) && !popup) {
             createLoginPopup();
         }
     };

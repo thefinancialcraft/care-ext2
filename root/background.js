@@ -1,14 +1,14 @@
 function handlePopupInjection(tabId, url) {
   if (!url) return;
 
-  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo') && !url.includes('#auth/login') && !url.includes('#/auth/resetpwd')) {
+  if (url.startsWith('https://faveo.careinsurance.com/NewFaveo') && !url.includes('#auth/login') && !url.includes('#/auth/resetpwd') && !url.includes('#/auth/verifyotp') && !url.includes('#/auth/changepwd')) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ['showPopup.js'],
     });
     console.log('✅ Dashboard/Quotation UI Injected into tab:', tabId);
   }
-  else if (url.includes('#auth/login') || (url.includes('faveo') && url.includes('/login'))) {
+  else if (url.includes('#auth/login') || url.includes('#/auth/resetpwd') || url.includes('#/auth/verifyotp') || url.includes('#/auth/changepwd') || (url.includes('faveo') && url.includes('/login'))) {
     chrome.scripting.executeScript({
       target: { tabId: tabId },
       files: ['favLogin.js'],
@@ -610,7 +610,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let unlockedExtensions = false;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // ... existing message handling ...
+  if (message.type === 'SAVE_PROPOSAL_TO_SUPABASE') {
+    const SUPABASE_PROPOSALS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/proposals?on_conflict=proposal_number';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    fetch(SUPABASE_PROPOSALS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify([message.payload])
+    })
+      .then(res => res.text())
+      .then(data => sendResponse({ success: true, response: data }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (message.type === 'UNLOCK_EXTENSIONS') {
     unlockedExtensions = true;
     chrome.tabs.update(sender.tab.id, { url: 'chrome://extensions/' });

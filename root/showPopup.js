@@ -2147,6 +2147,11 @@ const createCustomMonthActionUI = (monthsBack) => {
 
   // 🌫️ Initial Overlay for Name Fetching
   const showInitialOverlay = () => {
+      const currentUrl = window.location.href;
+      if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary') || currentUrl.includes('#auth/login') || currentUrl.includes('#/auth/resetpwd') || currentUrl.includes('#/auth/verifyotp') || currentUrl.includes('#/auth/changepwd')) {
+          console.log('🛑 [showPopup] Login/Portability URL detected! Skipping initial overlay.');
+          return;
+      }
       const existing = document.getElementById('initial-fetch-overlay');
       if (existing) return;
 
@@ -2268,6 +2273,17 @@ const createCustomMonthActionUI = (monthsBack) => {
   
     // ====== DASHBOARD HANDLERS ======
     const tryClickProfile = (nameSpan, spinner, buttonContainer) => {
+        const currentUrl = window.location.href;
+        if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary') || currentUrl.includes('#auth/login') || currentUrl.includes('#/auth/resetpwd') || currentUrl.includes('#/auth/verifyotp') || currentUrl.includes('#/auth/changepwd')) {
+            console.log('🛑 [showPopup] Login/Portability URL detected! Skipping agent name fetching.');
+            if (nameSpan) nameSpan.innerText = 'Agent';
+            if (spinner) spinner.style.display = 'none';
+            if (buttonContainer) buttonContainer.style.display = 'flex';
+            updateMinimizedStatus();
+            removeInitialOverlay();
+            return;
+        }
+
         let attempts = 0;
         const maxAttempts = 5;
 
@@ -3041,6 +3057,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                 chrome.storage.local.set({
                     autopilot_index: nextIndex,
+                    autopilot_account_attempts: 0,
                     autopilot_next_login_time: Date.now() + delayMs
                 }, function() {
                     console.log(`⚠️ Autopilot: Upload failed, skipping to next agent index ${nextIndex} in ${delayMs / 60000}m...`);
@@ -5217,6 +5234,508 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
        });
     };
 
+    // ====== PROPOSAL SUMMARY POPUP ======
+    const createProposalSummaryPopup = () => {
+        if (document.getElementById('proposal-summary-popup')) return;
+
+        const popup = document.createElement('div');
+        popup.id = 'proposal-summary-popup';
+        const loadIconCDN = () => {
+            const href = 'https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css';
+            if (!document.querySelector(`link[href="${href}"]`)) {
+                const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = href; document.head.appendChild(link);
+            }
+        };
+        loadIconCDN();
+
+        const header = document.createElement('div');
+        header.style.cssText = 'display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:12px; margin-bottom:2px; cursor:move; user-select:none;';
+        header.innerHTML = '\
+            <div style="display:flex; align-items:center; gap:8px;">\
+                <i class="fi flex fi-rr-document" style="color:#4caf50; font-size:18px;"></i>\
+                <h3 style="margin:0; font-size:15px; font-weight:600; color:#fff;">Proposal Summary</h3>\
+            </div>\
+            <button id="btn-open-proposal-modal" title="View Full Redesigned Details" style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.2); color:#fff; border-radius:8px; width:30px; height:30px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.2s;">\
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">\
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>\
+                    <polyline points="15 3 21 3 21 9"></polyline>\
+                    <line x1="10" y1="14" x2="21" y2="3"></line>\
+                </svg>\
+            </button>\
+        ';
+
+        const content = document.createElement('div');
+        content.id = 'proposal-summary-content';
+        content.style.cssText = 'display:flex; flex-direction:column; font-size:12px;';
+        content.innerHTML = '\
+            <div style="background:rgba(255,255,255,0.05); padding:8px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">\
+                <div>\
+                    <div style="font-size:10px; opacity:0.6; color:#ccc;">Proposal Number</div>\
+                    <div id="prop-val-num" style="font-size:15px; font-weight:700; color:#4caf50; letter-spacing:0.5px; margin-top:2px;">Searching...</div>\
+                </div>\
+                <button id="btn-map-proposal-data" title="Map & Upload to Supabase" style="background:#4caf50; border:none; color:#fff; border-radius:8px; padding:6px 12px; font-size:11px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:5px; transition:all 0.2s; box-shadow:0 4px 12px rgba(76, 175, 80, 0.3);">\
+                    <i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i>\
+                    <span>Map Data</span>\
+                </button>\
+            </div>\
+            <div id="prop-grid-details" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:0px; max-height:0px; opacity:0; transition:all 0.5s ease; overflow:hidden;">\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05); grid-column: span 2;">\
+                    <div style="font-size:10px; opacity:0.5;">Company Name</div>\
+                    <div id="prop-val-company" style="font-size:12px; font-weight:600; color:#4caf50;">Care Health Insurance</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Proposer Name</div>\
+                    <div id="prop-val-name" style="font-size:12px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Phone Number</div>\
+                    <div id="prop-val-phone" style="font-size:12px; font-weight:600; color:#fff;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05); grid-column: span 2;">\
+                    <div style="font-size:10px; opacity:0.5;">Email ID</div>\
+                    <div id="prop-val-email" style="font-size:12px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Plan Name</div>\
+                    <div id="prop-val-plan" style="font-size:12px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Tenure</div>\
+                    <div id="prop-val-tenure" style="font-size:12px; font-weight:600; color:#fff;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Sum Insured</div>\
+                    <div id="prop-val-si" style="font-size:12px; font-weight:600; color:#fff;">--</div>\
+                </div>\
+                <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">\
+                    <div style="font-size:10px; opacity:0.5;">Insured Members</div>\
+                    <div id="prop-val-members" style="font-size:12px; font-weight:600; color:#fff;">--</div>\
+                </div>\
+            </div>\
+            <div style="background:rgba(76, 175, 80, 0.1); padding:8px 12px; margin-top:8px; border-radius:10px; border:1px solid rgba(76, 175, 80, 0.2); display:flex; justify-content:space-between; align-items:center;">\
+                <div style="font-size:11px; font-weight:600; color:rgba(255,255,255,0.8);">Amount Payable</div>\
+                <div style="display:flex; align-items:center; gap:8px;">\
+                    <div id="prop-val-amount" style="font-size:14px; font-weight:700; color:#4caf50;">--</div>\
+                    <button id="btn-toggle-shrink-popup" title="Expand / Collapse Details" style="background:rgba(255,255,255,0.12); border:none; color:#fff; border-radius:6px; width:22px; height:22px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all 0.3s;">\
+                        <svg id="shrink-icon-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.3s; transform:rotate(180deg);">\
+                            <polyline points="18 15 12 9 6 15"></polyline>\
+                        </svg>\
+                    </button>\
+                </div>\
+            </div>\
+        ';
+
+        const embedTarget = document.querySelector('.proposal-sec') || document.querySelector('section') || document.body;
+
+        if (embedTarget && embedTarget !== document.body) {
+            if (window.getComputedStyle(embedTarget).position === 'static') {
+                embedTarget.style.position = 'relative';
+            }
+            Object.assign(popup.style, {
+                position: 'absolute', top: '15px', right: '15px',
+                background: 'rgba(30, 58, 95, 0.98)', backdropFilter: 'blur(15px)',
+                borderRadius: '16px', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+                zIndex: '9999', fontFamily: '"Segoe UI", Roboto, sans-serif',
+                padding: '16px 18px', width: '330px', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.15)',
+                display: 'flex', flexDirection: 'column', gap: '6px',
+                transition: 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)'
+            });
+            popup.appendChild(header);
+            popup.appendChild(content);
+            makeDraggable(popup, header);
+            embedTarget.insertBefore(popup, embedTarget.firstChild);
+        } else {
+            Object.assign(popup.style, {
+                position: 'fixed', top: '20px', right: '20px',
+                background: 'rgba(30, 58, 95, 0.98)', backdropFilter: 'blur(15px)',
+                borderRadius: '16px', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+                zIndex: '2147483647', fontFamily: '"Segoe UI", Roboto, sans-serif',
+                padding: '16px 18px', width: '330px', color: '#fff',
+                border: '1px solid rgba(255,255,255,0.15)',
+                display: 'flex', flexDirection: 'column', gap: '6px',
+                transition: 'all 0.5s cubic-bezier(0.23, 1, 0.32, 1)'
+            });
+            popup.appendChild(header);
+            popup.appendChild(content);
+            makeDraggable(popup, header);
+            document.body.appendChild(popup);
+        }
+
+        let isManuallyShrunk = true;
+
+        const btnShrink = document.getElementById('btn-toggle-shrink-popup');
+        if (btnShrink) {
+            btnShrink.onclick = (e) => {
+                e.stopPropagation();
+                const gridBox = document.getElementById('prop-grid-details');
+                const iconSvg = document.getElementById('shrink-icon-svg');
+                isManuallyShrunk = !isManuallyShrunk;
+                if (isManuallyShrunk) {
+                    if (gridBox) {
+                        gridBox.style.maxHeight = '0px';
+                        gridBox.style.opacity = '0';
+                        gridBox.style.marginTop = '0px';
+                        gridBox.style.overflow = 'hidden';
+                    }
+                    if (iconSvg) iconSvg.style.transform = 'rotate(180deg)';
+                } else {
+                    if (gridBox) {
+                        gridBox.style.maxHeight = '350px';
+                        gridBox.style.opacity = '1';
+                        gridBox.style.marginTop = '8px';
+                    }
+                    if (iconSvg) iconSvg.style.transform = 'rotate(0deg)';
+                }
+            };
+        }
+
+        const btnMap = document.getElementById('btn-map-proposal-data');
+        if (btnMap) {
+            btnMap.onclick = (e) => {
+                e.stopPropagation();
+                btnMap.disabled = true;
+                btnMap.innerHTML = '<span style="opacity:0.8;">Mapping...</span>';
+                btnMap.style.background = '#0065b3';
+
+                const elNum = document.getElementById('prop-val-num');
+                const num = elNum ? elNum.innerText.replace('Searching...', '').trim() : '';
+
+                const pName = getWidgetVal('Proposer Details', 'Name');
+                const pPhone = getWidgetVal('Proposer Details', 'Phone Number');
+                const pEmail = getWidgetVal('Proposer Details', 'Email ID') || getWidgetVal('Proposer Details', 'Email');
+
+                const pPlan = getWidgetVal('Product Details', 'Plan Name');
+                const pTenure = getWidgetVal('Product Details', 'Tenure');
+                const pSi = getWidgetVal('Product Details', 'Sum Insured');
+                const pMembers = getInsuredMemberCount();
+                
+                let pAmount = '';
+                const payRow = document.querySelector('.payment-row h4 span, .payment-row span');
+                if (payRow) pAmount = payRow.innerText.trim();
+                if (!pAmount) pAmount = getWidgetVal('Product Details', 'Premium Amount');
+
+                let summaryHtml = '';
+                const propSecBtn = document.querySelector('.proposal-sec');
+                if (propSecBtn) {
+                    const clonedBtn = propSecBtn.cloneNode(true);
+                    clonedBtn.querySelectorAll('.term-cond').forEach(el => {
+                        const parentCard = el.closest('.proposal-card');
+                        if (parentCard) parentCard.remove();
+                        else el.remove();
+                    });
+                    summaryHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Proposal Summary</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px}.proposal-sec{display:flex;flex-direction:column;gap:16px}.proposal-card{background:#ffffff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:18px 20px!important;margin-bottom:16px!important;color:#1e293b!important;box-shadow:0 4px 12px rgba(0,0,0,.03)!important}.header-sec{font-size:15px!important;font-weight:700!important;color:#0065b3!important;border-bottom:1px solid #f1f5f9!important;padding-bottom:10px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important}.row{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))!important;gap:12px!important;margin-bottom:12px!important}.widget-col{background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:10px 14px!important;border-radius:10px!important;display:flex!important;flex-direction:column!important;gap:4px!important}.widget-col h3{font-size:10px!important;color:#64748b!important;margin:0!important;text-transform:uppercase!important;letter-spacing:.5px!important}.widget-col span{font-size:13px!important;color:#0f172a!important;font-weight:600!important;word-break:break-word!important}h1,h2{grid-column:1/-1!important;font-size:13px!important;color:#0284c7!important;margin:8px 0 4px!important;font-weight:700!important}ul{grid-column:1/-1!important;list-style:none!important;padding:0!important;margin:0!important;display:flex!important;flex-wrap:wrap!important;gap:8px!important}li{background:#e0f2fe!important;padding:6px 12px!important;border-radius:20px!important;font-size:12px!important;color:#0369a1!important;border:1px solid #bae6fd!important;display:flex!important;align-items:center!important}.payment-row{background:#f0fdf4!important;border:1px solid #bbf7d0!important;font-size:16px!important;font-weight:700!important;color:#166534!important;display:flex!important;justify-content:space-between!important;align-items:center!important;border-radius:14px!important;padding:18px 20px!important}.payment-row h4{margin:0!important;font-size:16px!important;color:#0f172a!important;display:flex!important;width:100%!important;justify-content:space-between!important;align-items:center!important}.payment-row h4 span{font-size:18px!important;color:#15803d!important;font-weight:800!important}</style></head><body>${clonedBtn.outerHTML}</body></html>`;
+                }
+
+                if (!num) {
+                    btnMap.innerHTML = '❌ No Prop No!';
+                    btnMap.style.background = '#f44336';
+                    setTimeout(() => {
+                        btnMap.innerHTML = '<i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i><span>Map Data</span>';
+                        btnMap.style.background = '#4caf50';
+                        btnMap.disabled = false;
+                    }, 2500);
+                    return;
+                }
+
+                const genId = (seed) => {
+                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                    let hash = 0;
+                    for (let i = 0; i < seed.length; i++) { hash = (hash * 31 + seed.charCodeAt(i)) >>> 0; }
+                    let result = '';
+                    for (let i = 0; i < 12; i++) { hash = (hash * 1664525 + 1013904223) >>> 0; result += chars[hash % 62]; }
+                    return result;
+                };
+
+                chrome.runtime.sendMessage({
+                    type: 'SAVE_PROPOSAL_TO_SUPABASE',
+                    payload: {
+                        id: genId(num || Date.now().toString()),
+                        proposal_number: num,
+                        company_name: 'Care Health Insurance',
+                        proposer_name: pName,
+                        phone_number: pPhone,
+                        email_id: pEmail,
+                        plan_name: pPlan,
+                        tenure: pTenure,
+                        sum_insured: pSi,
+                        insured_members: pMembers,
+                        amount_payable: pAmount,
+                        proposal_summary: summaryHtml
+                    }
+                }, (resp) => {
+                    console.log('📡 Manual Map Data Upload to Supabase:', resp);
+                    btnMap.innerHTML = '✓ Mapped!';
+                    btnMap.style.background = '#2e7d32';
+                    setTimeout(() => {
+                        btnMap.innerHTML = '<i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i><span>Map Data</span>';
+                        btnMap.style.background = '#4caf50';
+                        btnMap.disabled = false;
+                    }, 2500);
+                });
+            };
+        }
+
+        const getWidgetVal = (cardHeaderTitle, labelTitle) => {
+            const cards = document.querySelectorAll('.proposal-card');
+            for (let card of cards) {
+                const headerEl = card.querySelector('.header-sec');
+                if (headerEl && headerEl.innerText.toLowerCase().includes(cardHeaderTitle.toLowerCase())) {
+                    const cols = card.querySelectorAll('.widget-col');
+                    for (let col of cols) {
+                        const h3 = col.querySelector('h3');
+                        if (h3 && h3.innerText.toLowerCase().includes(labelTitle.toLowerCase())) {
+                            const span = col.querySelector('span');
+                            return span ? span.innerText.trim() : '';
+                        }
+                    }
+                }
+            }
+            return '';
+        };
+
+        const getInsuredMemberCount = () => {
+            const cards = document.querySelectorAll('.proposal-card');
+            for (let card of cards) {
+                const headerEl = card.querySelector('.header-sec');
+                if (headerEl && headerEl.innerText.toLowerCase().includes('insured member')) {
+                    // Try h1 headings (member name headers)
+                    const memberHeadings = card.querySelectorAll('.row h1, h1');
+                    if (memberHeadings && memberHeadings.length > 0) {
+                        return memberHeadings.length + ' Member(s)';
+                    }
+                    // Fallback: count widget-col rows (each member has multiple cols)
+                    const rows = card.querySelectorAll('.row');
+                    if (rows && rows.length > 0) {
+                        return rows.length + ' Member(s)';
+                    }
+                    // Fallback: count direct child divs with widget-col
+                    const widgetCols = card.querySelectorAll('.widget-col');
+                    if (widgetCols && widgetCols.length > 0) {
+                        // Estimate: each member typically has ~3-4 widget cols
+                        return Math.ceil(widgetCols.length / 3) + ' Member(s)';
+                    }
+                }
+            }
+            return '';
+        };
+
+        const extractProposalDetails = () => {
+            // 1. Proposal Number
+            let num = '';
+            const spanEls = document.querySelectorAll('.title span, div.title span, h1 + span, .proposal-no, span');
+            for (let el of spanEls) {
+                const txt = (el.innerText || el.textContent || '').trim();
+                const match = txt.match(/Proposal\s*Number\s*[:\s]*(\d+)/i) || txt.match(/^Proposal\s*Number\s+(\d+)$/i);
+                if (match && match[1]) {
+                    num = match[1];
+                    break;
+                }
+            }
+            if (!num) {
+                const bodyTxt = document.body.innerText || '';
+                const match = bodyTxt.match(/Proposal\s*Number\s*[:\s]*(\d+)/i);
+                if (match && match[1]) num = match[1];
+            }
+
+            // 2. Proposer Details
+            const pName = getWidgetVal('Proposer Details', 'Name');
+            const pPhone = getWidgetVal('Proposer Details', 'Phone Number');
+            const pEmail = getWidgetVal('Proposer Details', 'Email ID') || getWidgetVal('Proposer Details', 'Email');
+
+            // 3. Product Details
+            const pPlan = getWidgetVal('Product Details', 'Plan Name');
+            const pTenure = getWidgetVal('Product Details', 'Tenure');
+            const pSi = getWidgetVal('Product Details', 'Sum Insured');
+            const pMembers = getInsuredMemberCount();
+            
+            // 4. Amount Payable
+            let pAmount = '';
+            const payRow = document.querySelector('.payment-row h4 span, .payment-row span');
+            if (payRow) pAmount = payRow.innerText.trim();
+            if (!pAmount) pAmount = getWidgetVal('Product Details', 'Premium Amount');
+
+            // Update DOM Elements
+            const elNum = document.getElementById('prop-val-num');
+            const elName = document.getElementById('prop-val-name');
+            const elPhone = document.getElementById('prop-val-phone');
+            const elEmail = document.getElementById('prop-val-email');
+            const elPlan = document.getElementById('prop-val-plan');
+            const elTenure = document.getElementById('prop-val-tenure');
+            const elSi = document.getElementById('prop-val-si');
+            const elMembers = document.getElementById('prop-val-members');
+            const elAmount = document.getElementById('prop-val-amount');
+
+            if (elNum) elNum.innerText = num || 'Searching...';
+            if (elName && pName) elName.innerText = pName;
+            if (elPhone && pPhone) elPhone.innerText = pPhone;
+            if (elEmail && pEmail) elEmail.innerText = pEmail;
+            if (elPlan && pPlan) elPlan.innerText = pPlan;
+            if (elTenure && pTenure) elTenure.innerText = pTenure;
+            if (elSi && pSi) elSi.innerText = pSi;
+            if (elMembers && pMembers) elMembers.innerText = pMembers;
+            if (elAmount && pAmount) elAmount.innerText = pAmount;
+
+            // 5. Scrape Proposal Summary as full standalone HTML (excluding term-cond)
+            let summaryHtml = '';
+            const propSec = document.querySelector('.proposal-sec');
+            if (propSec) {
+                const cloned = propSec.cloneNode(true);
+                cloned.querySelectorAll('.term-cond').forEach(el => {
+                    const parentCard = el.closest('.proposal-card');
+                    if (parentCard) parentCard.remove();
+                    else el.remove();
+                });
+                summaryHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Proposal Summary</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px}.proposal-sec{display:flex;flex-direction:column;gap:16px}.proposal-card{background:#ffffff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:18px 20px!important;margin-bottom:16px!important;color:#1e293b!important;box-shadow:0 4px 12px rgba(0,0,0,.03)!important}.header-sec{font-size:15px!important;font-weight:700!important;color:#0065b3!important;border-bottom:1px solid #f1f5f9!important;padding-bottom:10px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important}.row{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))!important;gap:12px!important;margin-bottom:12px!important}.widget-col{background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:10px 14px!important;border-radius:10px!important;display:flex!important;flex-direction:column!important;gap:4px!important}.widget-col h3{font-size:10px!important;color:#64748b!important;margin:0!important;text-transform:uppercase!important;letter-spacing:.5px!important}.widget-col span{font-size:13px!important;color:#0f172a!important;font-weight:600!important;word-break:break-word!important}h1,h2{grid-column:1/-1!important;font-size:13px!important;color:#0284c7!important;margin:8px 0 4px!important;font-weight:700!important}ul{grid-column:1/-1!important;list-style:none!important;padding:0!important;margin:0!important;display:flex!important;flex-wrap:wrap!important;gap:8px!important}li{background:#e0f2fe!important;padding:6px 12px!important;border-radius:20px!important;font-size:12px!important;color:#0369a1!important;border:1px solid #bae6fd!important;display:flex!important;align-items:center!important}.payment-row{background:#f0fdf4!important;border:1px solid #bbf7d0!important;font-size:16px!important;font-weight:700!important;color:#166534!important;display:flex!important;justify-content:space-between!important;align-items:center!important;border-radius:14px!important;padding:18px 20px!important}.payment-row h4{margin:0!important;font-size:16px!important;color:#0f172a!important;display:flex!important;width:100%!important;justify-content:space-between!important;align-items:center!important}.payment-row h4 span{font-size:18px!important;color:#15803d!important;font-weight:800!important}</style></head><body>${cloned.outerHTML}</body></html>`;
+            }
+
+            const elSummaryStatus = document.getElementById('prop-val-summary-status');
+            if (elSummaryStatus && summaryHtml) elSummaryStatus.innerText = 'Captured (HTML Ready)';
+
+            // 🚀 Smooth Height Expansion Transition when data is found
+            if (!isManuallyShrunk && (pName || pPhone || pPlan || pAmount)) {
+                const gridBox = document.getElementById('prop-grid-details');
+                if (gridBox && gridBox.style.maxHeight === '0px') {
+                    gridBox.style.maxHeight = '450px';
+                    gridBox.style.opacity = '1';
+                    gridBox.style.marginTop = '8px';
+                }
+            }
+
+            // 📤 Auto-save/upload complete proposal record to Supabase
+            if (num && pAmount && summaryHtml && popup.dataset.uploadedNum !== num) {
+                popup.dataset.uploadedNum = num;
+                const genId = (seed) => {
+                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                    let hash = 0;
+                    for (let i = 0; i < seed.length; i++) { hash = (hash * 31 + seed.charCodeAt(i)) >>> 0; }
+                    let result = '';
+                    for (let i = 0; i < 12; i++) { hash = (hash * 1664525 + 1013904223) >>> 0; result += chars[hash % 62]; }
+                    return result;
+                };
+                chrome.runtime.sendMessage({
+                    type: 'SAVE_PROPOSAL_TO_SUPABASE',
+                    payload: {
+                        id: genId(num),
+                        proposal_number: num,
+                        company_name: 'Care Health Insurance',
+                        proposer_name: pName,
+                        phone_number: pPhone,
+                        email_id: pEmail,
+                        plan_name: pPlan,
+                        tenure: pTenure,
+                        sum_insured: pSi,
+                        insured_members: pMembers,
+                        amount_payable: pAmount,
+                        proposal_summary: summaryHtml
+                    }
+                }, (resp) => {
+                    console.log('📡 Proposal auto-saved to Supabase:', resp);
+                });
+            }
+        };
+
+        const btnModal = document.getElementById('btn-open-proposal-modal');
+        if (btnModal) {
+            btnModal.onclick = (e) => {
+                e.stopPropagation();
+                openRedesignedProposalModal();
+            };
+        }
+
+        extractProposalDetails();
+        const intervalId = setInterval(extractProposalDetails, 1000);
+        popup.dataset.intervalId = intervalId.toString();
+    };
+
+    // ====== REDESIGNED FULL PROPOSAL MODAL (LIGHT THEME) ======
+    const openRedesignedProposalModal = () => {
+        let modal = document.getElementById('full-proposal-redesign-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'full-proposal-redesign-modal';
+            Object.assign(modal.style, {
+                position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+                background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(12px)',
+                zIndex: '2147483648', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: '"Segoe UI", Roboto, sans-serif', padding: '20px'
+            });
+
+            const modalContainer = document.createElement('div');
+            Object.assign(modalContainer.style, {
+                width: '920px', maxWidth: '95vw', maxHeight: '90vh',
+                background: '#ffffff', border: '1px solid #e2e8f0',
+                borderRadius: '20px', boxShadow: '0 20px 60px rgba(0, 0, 0, 0.18)',
+                display: 'flex', flexDirection: 'column', overflow: 'hidden', color: '#1e293b'
+            });
+
+            const topHeader = document.createElement('div');
+            topHeader.style.cssText = 'padding:16px 24px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; background:#f8fafc;';
+            topHeader.innerHTML = '\
+                <div style="display:flex; align-items:center; gap:12px;">\
+                    <div style="width:36px; height:36px; background:#0065b3; border-radius:10px; display:flex; align-items:center; justify-content:center;"><i class="fi flex fi-rr-document" style="color:#fff; font-size:18px;"></i></div>\
+                    <div>\
+                        <h3 style="margin:0; font-size:16px; font-weight:700; color:#0f172a;">Full Proposal Summary</h3>\
+                        <div style="font-size:11px; color:#64748b; margin-top:2px;">Complete Redesigned Overview</div>\
+                    </div>\
+                </div>\
+                <button id="close-proposal-modal-btn" style="background:#e2e8f0; border:none; color:#334155; width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; transition:0.2s;"><i class="fi flex fi-rr-cross-small"></i></button>\
+            ';
+
+            const modalBody = document.createElement('div');
+            modalBody.id = 'redesigned-proposal-body';
+            modalBody.style.cssText = 'padding:24px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:16px; scrollbar-width:thin; background:#f1f5f9;';
+
+            const style = document.createElement('style');
+            style.innerHTML = '\
+                #redesigned-proposal-body .proposal-card { background: #ffffff !important; border: 1px solid #e2e8f0 !important; border-radius: 14px !important; padding: 18px 20px !important; margin-bottom: 16px !important; color: #1e293b !important; box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important; }\
+                #redesigned-proposal-body .header-sec { font-size: 15px !important; font-weight: 700 !important; color: #0065b3 !important; border-bottom: 1px solid #f1f5f9 !important; padding-bottom: 10px !important; margin-bottom: 14px !important; display: flex !important; align-items: center !important; gap: 10px !important; }\
+                #redesigned-proposal-body .header-sec img { filter: none !important; width: 20px; height: 20px; }\
+                #redesigned-proposal-body .row { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important; gap: 12px !important; margin-bottom: 12px !important; }\
+                #redesigned-proposal-body .widget-col { background: #f8fafc !important; border: 1px solid #e2e8f0 !important; padding: 10px 14px !important; border-radius: 10px !important; display: flex !important; flex-direction: column !important; gap: 4px !important; }\
+                #redesigned-proposal-body .widget-col.full-width { grid-column: 1 / -1 !important; }\
+                #redesigned-proposal-body h3 { font-size: 10px !important; color: #64748b !important; margin: 0 !important; text-transform: uppercase !important; letter-spacing: 0.5px !important; }\
+                #redesigned-proposal-body span { font-size: 13px !important; color: #0f172a !important; font-weight: 600 !important; word-break: break-word !important; }\
+                #redesigned-proposal-body h1, #redesigned-proposal-body h2 { grid-column: 1 / -1 !important; font-size: 13px !important; color: #0284c7 !important; margin: 8px 0 4px 0 !important; font-weight: 700 !important; }\
+                #redesigned-proposal-body ul { grid-column: 1 / -1 !important; list-style: none !important; padding: 0 !important; margin: 0 !important; display: flex !important; flex-wrap: wrap !important; gap: 8px !important; }\
+                #redesigned-proposal-body li { background: #e0f2fe !important; padding: 6px 12px !important; border-radius: 20px !important; font-size: 12px !important; color: #0369a1 !important; border: 1px solid #bae6fd !important; display: flex !important; align-items: center !important; }\
+                #redesigned-proposal-body .payment-row { background: #f0fdf4 !important; border: 1px solid #bbf7d0 !important; font-size: 16px !important; font-weight: 700 !important; color: #166534 !important; display: flex !important; justify-content: space-between !important; align-items: center !important; }\
+                #redesigned-proposal-body .payment-row h4 { margin: 0 !important; font-size: 16px !important; color: #0f172a !important; display: flex !important; width: 100% !important; justify-content: space-between !important; align-items: center !important; }\
+                #redesigned-proposal-body .payment-row span { font-size: 18px !important; color: #15803d !important; font-weight: 800 !important; }\
+            ';
+
+            modalContainer.appendChild(topHeader);
+            modalContainer.appendChild(modalBody);
+            modalContainer.appendChild(style);
+            modal.appendChild(modalContainer);
+            document.body.appendChild(modal);
+
+            document.getElementById('close-proposal-modal-btn').onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        const body = document.getElementById('redesigned-proposal-body');
+        if (body) {
+            body.innerHTML = '';
+            const propSec = document.querySelector('.proposal-sec');
+            if (propSec) {
+                const cloned = propSec.cloneNode(true);
+                // 🛑 Skip .term-cond elements
+                cloned.querySelectorAll('.term-cond').forEach(el => {
+                    const parentCard = el.closest('.proposal-card');
+                    if (parentCard) parentCard.remove();
+                    else el.remove();
+                });
+                body.appendChild(cloned);
+            } else {
+                body.innerHTML = '<div style="text-align:center; padding:40px; color:rgba(255,255,255,0.5);">Proposal details section not found on page.</div>';
+            }
+        }
+
+        modal.style.display = 'flex';
+    };
+
     // ====== MAIN RUNNER ======
     const runPopup = () => {
       // 🚀 Initial Cleanup
@@ -5240,20 +5759,35 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         if (emiPopup) { emiPopup.style.display = 'none'; emiPopup.remove(); }
       }
 
-      // 2. Main Dashboard Popup
+      // 2. Main Dashboard vs Proposal Summary Popup
       const currentUrl = window.location.href;
-      if (currentUrl.startsWith('https://faveo.careinsurance.com/NewFaveo') && !currentUrl.includes('#auth/login') && !currentUrl.includes('#/auth/resetpwd')) {
-        if (!document.getElementById('my-dashboard-popup')) {
-          console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
-          const { popup, nameSpan, spinner, buttonContainer } = createPopup();
-          addSpinnerStyle();
-          setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
+      const isProposalPage = currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary');
+
+      if (isProposalPage) {
+          const oldDashPopup = document.getElementById('my-dashboard-popup');
+          if (oldDashPopup) { oldDashPopup.style.display = 'none'; oldDashPopup.remove(); }
           
-          setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
-        }
+          createProposalSummaryPopup();
       } else {
-         const oldPopup = document.getElementById('my-dashboard-popup');
-         if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
+          const oldPropPopup = document.getElementById('proposal-summary-popup');
+          if (oldPropPopup) {
+              if (oldPropPopup.dataset.intervalId) clearInterval(parseInt(oldPropPopup.dataset.intervalId));
+              oldPropPopup.remove();
+          }
+
+          if (currentUrl.startsWith('https://faveo.careinsurance.com/NewFaveo') && !currentUrl.includes('#auth/login') && !currentUrl.includes('#/auth/resetpwd') && !currentUrl.includes('#/auth/verifyotp') && !currentUrl.includes('#/auth/changepwd')) {
+            if (!document.getElementById('my-dashboard-popup')) {
+              console.log("%c[UI] %cDashboard UI initialized for URL: %c" + window.location.href, "color:#4FC3F7; font-weight:bold;", "color:#EEEEEE;", "color:#BDBDBD; font-style:italic;");
+              const { popup, nameSpan, spinner, buttonContainer } = createPopup();
+              addSpinnerStyle();
+              setMinimizedView(true); // 🚀 Explicitly force Minimized on startup
+              
+              setTimeout(() => tryClickProfile(nameSpan, spinner, buttonContainer), 500);
+            }
+          } else {
+             const oldPopup = document.getElementById('my-dashboard-popup');
+             if (oldPopup) { oldPopup.style.display = 'none'; oldPopup.remove(); }
+          }
       }
     };
     
@@ -5284,6 +5818,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     const currentTime = Date.now();
 
     chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+        const currentUrl = window.location.href;
+        if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary')) {
+            console.log('🛑 [showPopup] Portability/Proposal URL detected! Bypassing Auto-Sync & Extraction.');
+            return;
+        }
         if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
             console.log('🤖 Autopilot: Master Mode is active. Bypassing standard 2-hour Auto-Sync.');
             return;
@@ -5394,6 +5933,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
     // Acquire on startup if autopilot is already active & show Master Mode overlay
     chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+        const currentUrl = window.location.href;
+        if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary')) {
+            console.log('🛑 [showPopup] Portability/Proposal URL detected! Skipping Autopilot & Extraction overlay.');
+            return;
+        }
         if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
             acquireWakeLock();
             createExtractionOverlay();
@@ -5407,6 +5951,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         if (namespace === 'local') {
             if (changes.is_master_extension || changes.is_autopilot_active || changes.autopilot_paused) {
                 chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+                    const currentUrl = window.location.href;
+                    if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary')) {
+                        console.log('🛑 [showPopup] Portability/Proposal URL detected! Ignoring Master Mode changes.');
+                        return;
+                    }
                     const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
                     if (isMasterMode) {
                         createExtractionOverlay();
@@ -5488,14 +6037,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     else if (autopilotState === 'WAIT_5S_DELAY') {
                         const elapsed = Date.now() - autopilot5sTimer;
                         if (elapsed >= 10000) {
-                            console.log('🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering 2-Month filter.');
+                            const attempts = res.autopilot_account_attempts || 0;
+                            const monthsToFilter = attempts >= 2 ? 1 : 2; // Fallback to 1-Month on 3rd attempt (after 2 reloads)
+                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter}-Month filter (Attempt ${attempts + 1})...`);
                             autopilotState = 'TRIGGER_2M_FILTER';
                             autopilotFilterTriggerTime = Date.now();
                             // Guard: only trigger filter ONCE
                             if (!autopilotFilterTriggered && popup && !customUI && !liveModal && !completedModal && !isAutoSyncRunning) {
                                 autopilotFilterTriggered = true;
-                                handleCustomMonthClick(popup, 2);
-                                console.log('🤖 Autopilot: handleCustomMonthClick(2) triggered.');
+                                handleCustomMonthClick(popup, monthsToFilter);
+                                console.log(`🤖 Autopilot: handleCustomMonthClick(${monthsToFilter}) triggered (Attempt ${attempts + 1}).`);
                             }
                         } else {
                             console.log('🤖 Autopilot State: [WAIT_10S_DELAY] Delaying (' + Math.round((10000 - elapsed) / 1000) + 's left)...');
@@ -5505,7 +6056,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     else if (autopilotState === 'TRIGGER_2M_FILTER') {
                         const filterElapsed = Date.now() - autopilotFilterTriggerTime;
                         if (isMainLoaderVisible) {
-                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] 2-Month loading started. Transition to WAIT_2M_LOAD.');
+                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Loading started. Transition to WAIT_2M_LOAD.');
                             autopilotState = 'WAIT_2M_LOAD';
                         } else if (filterElapsed >= 10000) {
                             // Fallback: If spinner never appeared after 10 seconds (small dataset), go directly to extraction
@@ -5514,7 +6065,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
                             setTimeout(() => { extractRenewalTableData(); }, 10000);
                         } else {
-                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Waiting for 2-Month spinner to show... (' + Math.round(filterElapsed / 1000) + 's)');
+                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Waiting for spinner to show... (' + Math.round(filterElapsed / 1000) + 's)');
                         }
                     }
                     // === STATE: WAIT_2M_LOAD ===
@@ -5525,7 +6076,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
                             setTimeout(() => { extractRenewalTableData(); }, 10000);
                         } else {
-                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for 2-Month load to finish...');
+                            // ✅ Keep refreshing last_active so watchdog doesn't fire while spinner is legitimately loading
+                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
+                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for load to finish...');
                         }
                     }
                     // === STATE: START_EXTRACTION (terminal - extraction is running) ===
@@ -5538,8 +6091,12 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 // 3. Watchdog Check (Reload page if inactive for 3 minutes)
                 const lastActive = res.autopilot_last_active_time || Date.now();
                 if (Date.now() - lastActive > 180000) {
-                    console.log('⚠️ Autopilot: Watchdog timeout! Reloading page...');
-                    chrome.storage.local.set({ autopilot_last_active_time: Date.now() }, () => {
+                    const nextAttempt = (res.autopilot_account_attempts || 0) + 1;
+                    console.log(`⚠️ Autopilot: Watchdog timeout! Reloading page for Attempt ${nextAttempt + 1}...`);
+                    chrome.storage.local.set({ 
+                        autopilot_last_active_time: Date.now(),
+                        autopilot_account_attempts: nextAttempt
+                    }, () => {
                         window.location.reload();
                     });
                 }
