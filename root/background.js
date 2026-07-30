@@ -317,43 +317,48 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
 
     let startDate = null;
     let endDate = null;
-
-    if (Array.isArray(tableDataToUpload) && tableDataToUpload.length > 0) {
-      const dates = tableDataToUpload
-        .map(row => {
-          let dVal = null;
-          for (let key in row) {
-            if (key) {
-              const cleanKey = key.trim().toUpperCase().replace(/\.+$/, '');
-              if (cleanKey === 'LOGIN_DATE' || cleanKey === 'POLICY_START_DATE' || cleanKey.includes('DATE')) {
-                dVal = row[key];
-                if (cleanKey === 'LOGIN_DATE') break; // Prioritize LOGIN_DATE
+       if (Array.isArray(tableDataToUpload) && tableDataToUpload.length > 0) {
+      try {
+        const dates = tableDataToUpload
+          .map(row => {
+            if (!row) return null;
+            let dVal = null;
+            for (let key in row) {
+              if (key) {
+                const cleanKey = key.trim().toUpperCase().replace(/\.+$/, '');
+                if (cleanKey === 'LOGIN_DATE' || cleanKey === 'POLICY_START_DATE' || cleanKey.includes('DATE')) {
+                  dVal = row[key];
+                  if (cleanKey === 'LOGIN_DATE') break; // Prioritize LOGIN_DATE
+                }
               }
             }
-          }
-          return dVal ? dVal.toString().trim() : null;
-        })
-        .filter(Boolean);
+            return dVal ? dVal.toString().trim() : null;
+          })
+          .filter(Boolean);
 
-      if (dates.length > 0) {
-        // Parse and sort dates to find min (start_date) and max (end_date)
-        const parsed = dates.map(d => {
-          const parts = d.split(/[\/\-\.]/);
-          let dateObj = null;
-          if (parts.length === 3) {
-            if (parts[0].length === 4) dateObj = new Date(parts[0], parts[1] - 1, parts[2]); // YYYY-MM-DD
-            else dateObj = new Date(parts[2], parts[1] - 1, parts[0]); // DD/MM/YYYY
-          } else {
-            dateObj = new Date(d);
-          }
-          return { raw: d, time: dateObj && !isNaN(dateObj.getTime()) ? dateObj.getTime() : null };
-        }).filter(item => item.time !== null);
+        if (dates.length > 0) {
+          // Parse and sort dates to find min (start_date) and max (end_date)
+          const parsed = dates.map(d => {
+            if (!d) return { raw: null, time: null };
+            const parts = d.split(/[\/\-\.]/);
+            let dateObj = null;
+            if (parts.length === 3) {
+              if (parts[0].length === 4) dateObj = new Date(parts[0], parts[1] - 1, parts[2]); // YYYY-MM-DD
+              else dateObj = new Date(parts[2], parts[1] - 1, parts[0]); // DD/MM/YYYY
+            } else {
+              dateObj = new Date(d);
+            }
+            return { raw: d, time: dateObj && !isNaN(dateObj.getTime()) ? dateObj.getTime() : null };
+          }).filter(item => item.time !== null);
 
-        if (parsed.length > 0) {
-          parsed.sort((a, b) => a.time - b.time);
-          startDate = parsed[0].raw;
-          endDate = parsed[parsed.length - 1].raw;
+          if (parsed.length > 0) {
+            parsed.sort((a, b) => a.time - b.time);
+            startDate = parsed[0].raw;
+            endDate = parsed[parsed.length - 1].raw;
+          }
         }
+      } catch (err) {
+        console.error('Error parsing dates for Supabase log:', err);
       }
     }
 
@@ -370,9 +375,6 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
       return result;
     };
 
-    let totalPages = null;
-    let leadCount = totalRecords || (Array.isArray(tableDataToUpload) ? tableDataToUpload.length : 0);
-
     const logPayload = {
       id: generate6CharId(),
       agent_id: res.selectedAgentId || null,
@@ -380,8 +382,6 @@ function logSyncToSupabase(status, totalRecords = 0, uploadedRecords = 0, errorM
       status: status,
       total_records: totalRecords,
       uploaded_records: uploadedRecords,
-      lead_count: leadCount,
-      total_pages: res.lastExtractedPages || null,
       start_date: startDate,
       end_date: endDate,
       error_message: errorMessage,

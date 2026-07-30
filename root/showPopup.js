@@ -2287,6 +2287,25 @@ const createCustomMonthActionUI = (monthsBack) => {
         let attempts = 0;
         const maxAttempts = 5;
 
+        const handleFailureAndReload = () => {
+            let failCount = parseInt(sessionStorage.getItem('name_fetch_fail_count') || '0', 10);
+            failCount++;
+            if (failCount >= 3) {
+                console.error('❌ Multiple refetching attempts failed! Redirecting to login...');
+                sessionStorage.removeItem('name_fetch_fail_count');
+                const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                if (logoutBtn) {
+                    logoutBtn.click();
+                } else {
+                    window.location.hash = '#/auth/login';
+                    window.location.reload();
+                }
+            } else {
+                sessionStorage.setItem('name_fetch_fail_count', failCount.toString());
+                window.location.reload();
+            }
+        };
+
         const attemptFetch = () => {
             attempts++;
             console.log(`🌀 Name Fetch Attempt: ${attempts}/${maxAttempts}`);
@@ -2304,13 +2323,14 @@ const createCustomMonthActionUI = (monthsBack) => {
                 if (text && text !== 'Fetching name...' && lowerText !== 'agent') {
                     if (lowerText.includes('system')) {
                         console.warn('⚠️ Agent name fetched as System/System User fallback! Reloading page immediately to retry...');
-                        window.location.reload();
+                        handleFailureAndReload();
                         return;
                     }
                     const cleanedName = text.replace(/\s+/g, ' '); 
                     console.log('✅ Name found via:', selector);
                     nameSpan.innerText = cleanedName;
                     chrome.storage.local.set({ selectedAgentName: cleanedName });
+                    sessionStorage.removeItem('name_fetch_fail_count'); // Reset count on success
                     spinner.style.display = 'none';
                     buttonContainer.style.display = 'flex';
                     updateMinimizedStatus();
@@ -2345,7 +2365,7 @@ const createCustomMonthActionUI = (monthsBack) => {
             } else {
                 // 🚀 3. Max attempts reached without valid name -> Reload page to retry name fetch!
                 console.warn('⚠️ Agent name fetch failed or resulted in System/System User after 5 attempts! Reloading page to retry...');
-                window.location.reload();
+                handleFailureAndReload();
             }
         };
 

@@ -22,6 +22,12 @@
                getKey(agent, 'otp');
     };
 
+    var isPageInOtpState = function() {
+        return !!(document.getElementById('passwordOtp') || 
+                  document.querySelector('input[formcontrolname="otp"]') || 
+                  document.querySelector('.otp-group'));
+    };
+
     var updateUIToOTPState = function(agent, list) {
         var statusMsg = document.getElementById('favLoginStatus');
         if (statusMsg) statusMsg.innerText = 'Waiting for OTP...';
@@ -49,13 +55,41 @@
 
         // 🚀 Trigger OTP Fetch for Agent
         setTimeout(function() {
-            if (agent) {
+            if (agent && isPageInOtpState()) {
                 fetchAndFillOtp(agent, 0); 
             }
         }, 2000);
     };
 
+    var handleOtpFetchFailure = function(agent) {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+            var delayMs = 10 * 60 * 1000; // 10 minutes pause/delay
+            var nextIndex = res.autopilot_index;
+            if (res.autopilot_agents && res.autopilot_agents.length > 0) {
+                nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+            }
+            chrome.storage.local.set({
+                isAuthorized: false, // Reset popup state to login page
+                autopilot_index: nextIndex,
+                autopilot_account_attempts: 0,
+                autopilot_next_login_time: Date.now() + delayMs
+            }, function() {
+                console.warn('⚠️ OTP Fetch failed! Pausing master autopilot for 10 mins and skipping to next agent (index ' + nextIndex + ')...');
+                chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                    window.location.hash = '#/auth/login';
+                    setTimeout(function() {
+                        window.location.reload();
+                    }, 500);
+                });
+            });
+        });
+    };
+
     var fetchAndFillOtp = function(agent, retryCount) {
+        if (!isPageInOtpState()) {
+            console.log('🚫 [favLogin] Skipping OTP fetch - Page is not in OTP verification/reset state.');
+            return;
+        }
         retryCount = retryCount || 0;
         var apiUrl = getOtpApiUrl(agent);
         var statusMsg = document.getElementById('favLoginStatus');
@@ -63,40 +97,64 @@
         console.log('🔍 [favLogin] Fetching OTP for agent:', agent, 'API URL:', apiUrl);
 
         if (apiUrl) {
-            if (statusMsg) statusMsg.innerText = 'Fetching OTP (Attempt ' + (retryCount + 1) + '/20)...';
+            if (statusMsg) statusMsg.innerText = 'Fetching OTP (Attempt ' + (retryCount + 1) + '/5)...';
             
             fetch(apiUrl)
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
                     console.log('📥 [favLogin] OTP API Response:', data);
+                    var otpVal = null;
+                    if (typeof data === 'object' && data !== null) {
+                        otpVal = data.otp || data.code || data.data || data.otp_code || data.otpNumber || data.otp_number;
+                    }
+                    if (!otpVal) otpVal = data;
+                    if (typeof otpVal === 'number') otpVal = String(otpVal);
+                    if (typeof otpVal === 'string') otpVal = otpVal.trim();
+
                     var otpDate = data.date ? new Date(data.date).getTime() : 0;
                     var now = Date.now();
                     var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 0;
 
-                    if (otpDate === 0 || diffMinutes <= 3) {
-                        displayOtpAndSubmit(data, agent);
-                    } else {
-                        if (retryCount < 20) {
-                            setTimeout(function() {
-                                fetchAndFillOtp(agent, retryCount + 1);
-                            }, 3000);
+                    chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
+                        var lastFilledOtp = storageRes.last_filled_otp;
+                        var isOtpFresh = (otpDate === 0 || diffMinutes <= 3);
+                        var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
+
+                        if (isOtpFresh && isOtpNew) {
+                            chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
+                                displayOtpAndSubmit(data, agent);
+                            });
                         } else {
-                            if (statusMsg) statusMsg.innerText = 'OTP request timed out. Retrying...';
-                            setTimeout(function() { fetchAndFillOtp(agent, 0); }, 3000);
+                            var reason = !isOtpFresh ? 'stale' : 'same as old OTP';
+                            console.log('⏳ Fetched OTP (' + otpVal + ') is ' + reason + '. Retrying in 5s...');
+                            if (retryCount < 5) {
+                                setTimeout(function() {
+                                    fetchAndFillOtp(agent, retryCount + 1);
+                                }, 5000);
+                            } else {
+                                if (statusMsg) statusMsg.innerText = 'OTP request timed out (5 attempts). Skipping agent...';
+                                handleOtpFetchFailure(agent);
+                            }
                         }
-                    }
+                    });
                 })
                 .catch(function(err) {
                     console.error('❌ OTP Fetch error:', err);
-                    if (retryCount < 20) {
+                    if (retryCount < 5) {
                         setTimeout(function() {
                             fetchAndFillOtp(agent, retryCount + 1);
-                        }, 3000);
+                        }, 5000);
+                    } else {
+                        if (statusMsg) statusMsg.innerText = 'OTP Fetch error. Skipping agent...';
+                        handleOtpFetchFailure(agent);
                     }
                 });
         } else {
             console.error('❌ No agent_otp_finder URL found for agent:', agent);
-            if (statusMsg) statusMsg.innerText = 'No OTP Finder URL configured for this agent.';
+            if (statusMsg) statusMsg.innerText = 'No OTP Finder URL configured for this agent. Skipping...';
+            setTimeout(function() {
+                handleOtpFetchFailure(agent);
+            }, 5000);
         }
     };
 
@@ -181,22 +239,37 @@
 
             // 🔁 Retry fetch 5 times before resending
             var retryFetchOtp = function(attemptsLeft) {
+                if (!isPageInOtpState()) {
+                    console.log('🚫 [favLogin] Page not in OTP state anymore during retry fetch. Cancelling.');
+                    return;
+                }
                 if (attemptsLeft <= 0) {
-                    console.log('🔄 [favLogin] All re-fetch attempts done. Clicking Resend OTP...');
-                    if (statusMsg) { statusMsg.innerText = 'No valid OTP found. Resending OTP...'; statusMsg.style.color = '#ff9800'; }
-                    var resendLink = document.querySelector('.unlock a') ||
-                                     document.querySelector('#resend_otp_btn') ||
-                                     Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                         return (el.innerText || '').toLowerCase().includes('resend');
-                                     });
-                    if (resendLink) {
-                        console.log('🔄 [favLogin] Resend OTP clicked.');
-                        resendLink.click();
-                    }
-                    setTimeout(function() {
-                        if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
-                        if (agent) fetchAndFillOtp(agent, 0);
-                    }, 3500);
+                    console.log('🔄 [favLogin] All re-fetch attempts done. Checking Resend OTP...');
+                    chrome.storage.local.get(['otp_resend_count'], function(rCountRes) {
+                        var resendCount = rCountRes.otp_resend_count || 0;
+                        if (resendCount >= 3) {
+                            console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
+                            handleOtpFetchFailure(agent);
+                            return;
+                        }
+                        
+                        if (statusMsg) { statusMsg.innerText = 'No valid OTP found. Resending OTP (' + (resendCount + 1) + '/3)...'; statusMsg.style.color = '#ff9800'; }
+                        var resendLink = document.querySelector('.unlock a') ||
+                                         document.querySelector('#resend_otp_btn') ||
+                                         Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                             return (el.innerText || '').toLowerCase().includes('resend');
+                                         });
+                        if (resendLink) {
+                            console.log('🔄 [favLogin] Resend OTP clicked.');
+                            chrome.storage.local.set({ otp_resend_count: resendCount + 1 }, function() {
+                                resendLink.click();
+                            });
+                        }
+                        setTimeout(function() {
+                            if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
+                            if (agent) fetchAndFillOtp(agent, 0);
+                        }, 5000);
+                    });
                     return;
                 }
                 if (statusMsg) statusMsg.innerText = 'Re-fetching latest OTP (attempt ' + (6 - attemptsLeft) + '/5)...';
@@ -205,19 +278,36 @@
                 fetch(apiUrl)
                     .then(function(res) { return res.json(); })
                     .then(function(data) {
+                        var otpVal = null;
+                        if (typeof data === 'object' && data !== null) {
+                            otpVal = data.otp || data.code || data.data || data.otp_code || data.otpNumber || data.otp_number;
+                        }
+                        if (!otpVal) otpVal = data;
+                        if (typeof otpVal === 'number') otpVal = String(otpVal);
+                        if (typeof otpVal === 'string') otpVal = otpVal.trim();
+
                         var otpDate = data.date ? new Date(data.date).getTime() : 0;
                         var now = Date.now();
                         var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 999;
-                        if (otpDate !== 0 && diffMinutes <= 3) {
-                            console.log('✅ [favLogin] Fresh OTP fetched on retry! Submitting...');
-                            displayOtpAndSubmit(data, agent);
-                        } else {
-                            console.log('⏳ OTP not fresh yet. Retrying in 2s... (' + attemptsLeft + ' left)');
-                            setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 2000);
-                        }
+
+                        chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
+                            var lastFilledOtp = storageRes.last_filled_otp;
+                            var isOtpFresh = (otpDate !== 0 && diffMinutes <= 3);
+                            var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
+
+                            if (isOtpFresh && isOtpNew) {
+                                console.log('✅ [favLogin] Fresh OTP fetched on retry! Submitting...');
+                                chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
+                                    displayOtpAndSubmit(data, agent);
+                                });
+                            } else {
+                                console.log('⏳ OTP not fresh or not new yet. Retrying in 5s... (' + attemptsLeft + ' left)');
+                                setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 5000);
+                            }
+                        });
                     })
                     .catch(function() {
-                        setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 2000);
+                        setTimeout(function() { retryFetchOtp(attemptsLeft - 1); }, 5000);
                     });
             };
 
@@ -319,13 +409,24 @@
             chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
                 if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents && res.autopilot_agents.length > 0) {
                     var nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
-                    var delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                    var delayMs = 10 * 60 * 1000; // 10 minutes pause/delay
                     chrome.storage.local.set({
+                        isAuthorized: false, // Reset popup state to login page
                         autopilot_index: nextIndex,
                         autopilot_account_attempts: 0,
                         autopilot_next_login_time: Date.now() + delayMs
                     }, function() {
-                        console.log('🤖 Autopilot Error handler: Reloading page to try next agent index ' + nextIndex + '...');
+                        console.log('🤖 Autopilot Error handler: Pausing for 10 mins and reloading page to try next agent index ' + nextIndex + '...');
+                        chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                            window.location.hash = '#/auth/login';
+                            setTimeout(function() {
+                                window.location.reload();
+                            }, 500);
+                        });
+                    });
+                } else {
+                    chrome.storage.local.set({ isAuthorized: false }, function() {
+                        window.location.hash = '#/auth/login';
                         window.location.reload();
                     });
                 }
@@ -1250,7 +1351,7 @@
         };
 
         var startLoginCycle = function(agent, aName, aId, list) {
-            chrome.storage.local.set({ selectedAgentName: aName, selectedAgentId: aId });
+            chrome.storage.local.set({ selectedAgentName: aName, selectedAgentId: aId, otp_resend_count: 0, last_filled_otp: '' });
             list.innerHTML = '';
             var activeCard = document.createElement('div');
             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
@@ -1336,42 +1437,75 @@
                             if (!agentForRetry) return;
 
                             var retryFetchBeforeResend = function(attemptsLeft) {
-                                if (attemptsLeft <= 0) {
-                                    // All retries exhausted — now resend OTP
-                                    console.log('🔄 [favLogin] All re-fetch attempts failed. Clicking Resend OTP now...');
-                                    if (statusMsg) { statusMsg.innerText = 'No new OTP found. Resending OTP...'; statusMsg.style.color = '#ff9800'; }
-                                    var resendBtnEl = document.querySelector('.unlock a') ||
-                                                      document.querySelector('#resend_otp_btn') ||
-                                                      Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                                          return (el.innerText || '').toLowerCase().includes('resend');
-                                                      });
-                                    if (resendBtnEl) { resendBtnEl.click(); }
-                                    setTimeout(function() {
-                                        if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
-                                        fetchAndFillOtp(agentForRetry, 0);
-                                    }, 3500);
+                                if (!isPageInOtpState()) {
+                                    console.log('🚫 [favLogin] Page not in OTP state anymore during observer retry fetch. Cancelling.');
                                     return;
                                 }
-                                // Try fetching latest OTP
+                                if (attemptsLeft <= 0) {
+                                    console.log('🔄 [favLogin] All re-fetch attempts done. Checking Resend OTP...');
+                                    chrome.storage.local.get(['otp_resend_count'], function(rCountRes) {
+                                        var resendCount = rCountRes.otp_resend_count || 0;
+                                        if (resendCount >= 3) {
+                                            console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
+                                            handleOtpFetchFailure(agentForRetry);
+                                            return;
+                                        }
+                                        
+                                        if (statusMsg) { statusMsg.innerText = 'No valid OTP found. Resending OTP (' + (resendCount + 1) + '/3)...'; statusMsg.style.color = '#ff9800'; }
+                                        var resendBtnEl = document.querySelector('.unlock a') ||
+                                                          document.querySelector('#resend_otp_btn') ||
+                                                          Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                                              return (el.innerText || '').toLowerCase().includes('resend');
+                                                          });
+                                        if (resendBtnEl) {
+                                            console.log('🔄 [favLogin] Resend OTP clicked.');
+                                            chrome.storage.local.set({ otp_resend_count: resendCount + 1 }, function() {
+                                                resendBtnEl.click();
+                                            });
+                                        }
+                                        setTimeout(function() {
+                                            if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
+                                            fetchAndFillOtp(agentForRetry, 0);
+                                        }, 5000);
+                                    });
+                                    return;
+                                }
                                 if (statusMsg) statusMsg.innerText = 'Re-fetching OTP (attempt ' + (6 - attemptsLeft) + '/5)...';
                                 var apiUrl = getOtpApiUrl(agentForRetry);
                                 if (!apiUrl) { retryFetchBeforeResend(0); return; }
                                 fetch(apiUrl)
                                     .then(function(res) { return res.json(); })
                                     .then(function(data) {
+                                        var otpVal = null;
+                                        if (typeof data === 'object' && data !== null) {
+                                            otpVal = data.otp || data.code || data.data || data.otp_code || data.otpNumber || data.otp_number;
+                                        }
+                                        if (!otpVal) otpVal = data;
+                                        if (typeof otpVal === 'number') otpVal = String(otpVal);
+                                        if (typeof otpVal === 'string') otpVal = otpVal.trim();
+
                                         var otpDate = data.date ? new Date(data.date).getTime() : 0;
                                         var now = Date.now();
                                         var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 999;
-                                        if (otpDate !== 0 && diffMinutes <= 3) {
-                                            console.log('✅ [favLogin] Fresh OTP found on retry! Submitting...');
-                                            displayOtpAndSubmit(data, agentForRetry);
-                                        } else {
-                                            console.log('⏳ OTP not fresh yet. Retrying in 2s... (' + attemptsLeft + ' attempts left)');
-                                            setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 2000);
-                                        }
+
+                                        chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
+                                            var lastFilledOtp = storageRes.last_filled_otp;
+                                            var isOtpFresh = (otpDate !== 0 && diffMinutes <= 3);
+                                            var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
+
+                                            if (isOtpFresh && isOtpNew) {
+                                                console.log('✅ [favLogin] Fresh OTP found on retry! Submitting...');
+                                                chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
+                                                    displayOtpAndSubmit(data, agentForRetry);
+                                                });
+                                            } else {
+                                                console.log('⏳ OTP not fresh or not new yet. Retrying in 5s... (' + attemptsLeft + ' attempts left)');
+                                                setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 5000);
+                                            }
+                                        });
                                     })
                                     .catch(function() {
-                                        setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 2000);
+                                        setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 5000);
                                     });
                             };
 
@@ -1569,20 +1703,40 @@
                             if (!agentForRetry2) { if (popup) popup.dataset.handlingInvalidOtp = 'false'; return; }
 
                             var retryFetchBeforeResend2 = function(attemptsLeft2) {
+                                if (!isPageInOtpState()) {
+                                    console.log('🚫 [favLogin] Page not in OTP state anymore during watcher retry fetch. Cancelling.');
+                                    if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                    return;
+                                }
                                 if (attemptsLeft2 <= 0) {
-                                    console.log('🔄 [favLogin] All re-fetch attempts done. Resending OTP now...');
-                                    if (statusMsg2) { statusMsg2.innerText = 'No new OTP. Resending OTP...'; statusMsg2.style.color = '#ff9800'; }
-                                    var resendBtnEl2 = document.querySelector('.unlock a') ||
-                                                       document.querySelector('#resend_otp_btn') ||
-                                                       Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                                           return (el.innerText || '').toLowerCase().includes('resend');
-                                                       });
-                                    if (resendBtnEl2) { resendBtnEl2.click(); }
-                                    setTimeout(function() {
-                                        if (statusMsg2) { statusMsg2.innerText = 'Fetching OTP after resend...'; statusMsg2.style.color = '#4fc3f7'; }
-                                        if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                        fetchAndFillOtp(agentForRetry2, 0);
-                                    }, 3500);
+                                    console.log('🔄 [favLogin] All re-fetch attempts done. Checking Resend OTP...');
+                                    chrome.storage.local.get(['otp_resend_count'], function(rCountRes) {
+                                        var resendCount = rCountRes.otp_resend_count || 0;
+                                        if (resendCount >= 3) {
+                                            console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
+                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                            handleOtpFetchFailure(agentForRetry2);
+                                            return;
+                                        }
+                                        
+                                        if (statusMsg2) { statusMsg2.innerText = 'No new OTP. Resending OTP (' + (resendCount + 1) + '/3)...'; statusMsg2.style.color = '#ff9800'; }
+                                        var resendBtnEl2 = document.querySelector('.unlock a') ||
+                                                           document.querySelector('#resend_otp_btn') ||
+                                                           Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                                               return (el.innerText || '').toLowerCase().includes('resend');
+                                                           });
+                                        if (resendBtnEl2) {
+                                            console.log('🔄 [favLogin] Resend OTP clicked.');
+                                            chrome.storage.local.set({ otp_resend_count: resendCount + 1 }, function() {
+                                                resendBtnEl2.click();
+                                            });
+                                        }
+                                        setTimeout(function() {
+                                            if (statusMsg2) { statusMsg2.innerText = 'Fetching OTP after resend...'; statusMsg2.style.color = '#4fc3f7'; }
+                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                            fetchAndFillOtp(agentForRetry2, 0);
+                                        }, 5000);
+                                    });
                                     return;
                                 }
                                 if (statusMsg2) statusMsg2.innerText = 'Re-fetching latest OTP (attempt ' + (6 - attemptsLeft2) + '/5)...';
@@ -1591,19 +1745,37 @@
                                 fetch(apiUrl2)
                                     .then(function(r2) { return r2.json(); })
                                     .then(function(d2) {
+                                        var otpVal = null;
+                                        if (typeof d2 === 'object' && d2 !== null) {
+                                            otpVal = d2.otp || d2.code || d2.data || d2.otp_code || d2.otpNumber || d2.otp_number;
+                                        }
+                                        if (!otpVal) otpVal = d2;
+                                        if (typeof otpVal === 'number') otpVal = String(otpVal);
+                                        if (typeof otpVal === 'string') otpVal = otpVal.trim();
+
                                         var otpDate2 = d2.date ? new Date(d2.date).getTime() : 0;
                                         var now2 = Date.now();
                                         var diff2 = otpDate2 > 0 ? ((now2 - otpDate2) / (1000 * 60)) : 999;
-                                        if (otpDate2 !== 0 && diff2 <= 3) {
-                                            console.log('✅ [favLogin] Fresh OTP found on watcher retry!');
-                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                            displayOtpAndSubmit(d2, agentForRetry2);
-                                        } else {
-                                            setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 2000);
-                                        }
+
+                                        chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
+                                            var lastFilledOtp = storageRes.last_filled_otp;
+                                            var isOtpFresh = (otpDate2 !== 0 && diff2 <= 3);
+                                            var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
+
+                                            if (isOtpFresh && isOtpNew) {
+                                                console.log('✅ [favLogin] Fresh OTP found on watcher retry!');
+                                                if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                                                chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
+                                                    displayOtpAndSubmit(d2, agentForRetry2);
+                                                });
+                                            } else {
+                                                console.log('⏳ OTP not fresh or not new yet. Retrying in 5s... (' + attemptsLeft2 + ' left)');
+                                                setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 5000);
+                                            }
+                                        });
                                     })
                                     .catch(function() {
-                                        setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 2000);
+                                        setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 5000);
                                     });
                             };
 
