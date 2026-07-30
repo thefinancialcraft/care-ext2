@@ -85,6 +85,29 @@
         });
     };
 
+    var skipToNextAgentImmediately = function() {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+            var nextIndex = res.autopilot_index;
+            if (res.autopilot_agents && res.autopilot_agents.length > 0) {
+                nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
+            }
+            chrome.storage.local.set({
+                isAuthorized: false, // Reset popup state to login page
+                autopilot_index: nextIndex,
+                autopilot_account_attempts: 0,
+                autopilot_next_login_time: Date.now() + 5000 // 5 seconds delay to start next login
+            }, function() {
+                console.log('🤖 Autopilot: Skipped immediately to next agent index ' + nextIndex);
+                chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                    window.location.hash = '#/auth/login';
+                    setTimeout(function() {
+                        window.location.reload();
+                    }, 500);
+                });
+            });
+        });
+    };
+
     var fetchAndFillOtp = function(agent, retryCount) {
         if (!isPageInOtpState()) {
             console.log('🚫 [favLogin] Skipping OTP fetch - Page is not in OTP verification/reset state.');
@@ -1425,13 +1448,20 @@
                         setTimeout(function() {
                             window.location.hash = '#/auth/login';
                         }, 3000);
-                    } else if (txt.includes('Valid otp Number') || txt.includes('Valid OTP') || txt.includes('invalid otp') || txt.includes('Invalid OTP')) {
+                    } else if (txt.toLowerCase().includes('please enter valid otp number')) {
+                        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Skipping Agent...'; statusMsg.style.color = '#ff5252'; }
+                        if (loader) loader.style.display = 'none';
+                        foundError = true;
+
+                        console.log('🚨 Invalid OTP detected on page: "' + txt + '". Skipping agent immediately...');
+                        skipToNextAgentImmediately();
+                    } else if (txt.toLowerCase().includes('valid otp') || txt.toLowerCase().includes('invalid otp')) {
                         if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Re-fetching latest OTP first...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
 
-                        console.log('⚠️ Invalid OTP error on page! Will retry fetch 4-5x before resending...');
-
+                        console.log('⚠️ Invalid OTP error on page! Will retry fetch 5 times before resending...');
+                        
                         chrome.storage.local.get(['favPendingResetAgent'], function(r) {
                             var agentForRetry = r.favPendingResetAgent;
                             if (!agentForRetry) return;
@@ -1447,7 +1477,7 @@
                                         var resendCount = rCountRes.otp_resend_count || 0;
                                         if (resendCount >= 3) {
                                             console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
-                                            handleOtpFetchFailure(agentForRetry);
+                                            skipToNextAgentImmediately();
                                             return;
                                         }
                                         
@@ -1689,11 +1719,18 @@
             var errEl = document.querySelector('.error-message.text-center, .error-message, div.alert-danger');
             if (errEl) {
                 var errText = (errEl.innerText || errEl.textContent || '').toLowerCase();
-                if (errText.includes('invalid otp') || errText.includes('valid otp')) {
+                if (errText.includes('please enter valid otp number')) {
                     var isAlreadyHandlingInvalidOtp = popup && popup.dataset && popup.dataset.handlingInvalidOtp === 'true';
                     if (!isAlreadyHandlingInvalidOtp) {
                         if (popup) popup.dataset.handlingInvalidOtp = 'true';
-                        console.log('🚨 [favLogin] "Invalid OTP" error detected! Retrying fetch 4-5x before resending...');
+                        console.log('🚨 [favLogin] "Please enter valid otp number" error detected! Skipping agent immediately...');
+                        skipToNextAgentImmediately();
+                    }
+                } else if (errText.includes('invalid otp') || errText.includes('valid otp') || errText.includes('valid otp number')) {
+                    var isAlreadyHandlingInvalidOtp = popup && popup.dataset && popup.dataset.handlingInvalidOtp === 'true';
+                    if (!isAlreadyHandlingInvalidOtp) {
+                        if (popup) popup.dataset.handlingInvalidOtp = 'true';
+                        console.log('🚨 [favLogin] "Invalid OTP" error detected! Retrying fetch 5x before resending...');
 
                         var statusMsg2 = document.getElementById('favLoginStatus');
                         if (statusMsg2) { statusMsg2.innerText = 'Invalid OTP — Re-fetching latest OTP first...'; statusMsg2.style.color = '#ff5252'; }
@@ -1715,7 +1752,7 @@
                                         if (resendCount >= 3) {
                                             console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
                                             if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                            handleOtpFetchFailure(agentForRetry2);
+                                            skipToNextAgentImmediately();
                                             return;
                                         }
                                         
