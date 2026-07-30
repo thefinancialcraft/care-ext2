@@ -2310,6 +2310,7 @@ const createCustomMonthActionUI = (monthsBack) => {
                     const cleanedName = text.replace(/\s+/g, ' '); 
                     console.log('✅ Name found via:', selector);
                     nameSpan.innerText = cleanedName;
+                    chrome.storage.local.set({ selectedAgentName: cleanedName });
                     spinner.style.display = 'none';
                     buttonContainer.style.display = 'flex';
                     updateMinimizedStatus();

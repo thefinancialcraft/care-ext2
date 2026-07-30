@@ -450,7 +450,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (uploadState.currentIndex < uploadState.total) {
       startUploadLoop();
     }
-    else sendUpdateToContent('UPLOAD_COMPLETE', { total: uploadState.total, uploaded: uploadState.uploaded, preChecked: true });
+    else {
+      sendUpdateToContent('UPLOAD_COMPLETE', { total: uploadState.total, uploaded: uploadState.uploaded, preChecked: true });
+      logSyncToSupabase('SUCCESS', uploadState.total, uploadState.uploaded, null);
+    }
   }
   else if (message.type === 'PAUSE_UPLOAD') {
     uploadState.isPaused = true;
