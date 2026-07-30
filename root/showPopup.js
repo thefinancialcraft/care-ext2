@@ -2301,7 +2301,12 @@ const createCustomMonthActionUI = (monthsBack) => {
                 const el = document.querySelector(selector);
                 const text = el?.innerText?.trim();
                 const lowerText = text ? text.toLowerCase() : '';
-                if (text && text !== 'Fetching name...' && lowerText !== 'agent' && !lowerText.includes('system')) {
+                if (text && text !== 'Fetching name...' && lowerText !== 'agent') {
+                    if (lowerText.includes('system')) {
+                        console.warn('⚠️ Agent name fetched as System/System User fallback! Reloading page immediately to retry...');
+                        window.location.reload();
+                        return;
+                    }
                     const cleanedName = text.replace(/\s+/g, ' '); 
                     console.log('✅ Name found via:', selector);
                     nameSpan.innerText = cleanedName;
@@ -6030,8 +6035,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         const elapsed = Date.now() - autopilot5sTimer;
                         if (elapsed >= 10000) {
                             const attempts = res.autopilot_account_attempts || 0;
-                            const monthsToFilter = attempts >= 1 ? 1 : 2; // Fallback to 1-Month on 2nd attempt (after 1 reload)
-                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter}-Month filter (Attempt ${attempts + 1})...`);
+                            const monthsToFilter = attempts >= 1 ? 0 : 1; // 1st attempt: 1-Month, 2nd attempt: Current Month (0-Month)
+                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter === 0 ? 'Current Month' : monthsToFilter + '-Month'} filter (Attempt ${attempts + 1})...`);
                             autopilotState = 'TRIGGER_2M_FILTER';
                             autopilotFilterTriggerTime = Date.now();
                             // Guard: only trigger filter ONCE
@@ -6084,8 +6089,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 if (Date.now() - lastActive > 180000) { // 3 Minutes (180,000ms) Hard Timeout
                     const currentAttempts = res.autopilot_account_attempts || 0;
                     if (currentAttempts >= 1) {
-                        // Attempt 2 (1-Month filter) also exceeded 3 minutes -> Logout & Skip to Next Agent!
-                        console.error('❌ Autopilot: Attempt 2 (1-Month filter) also exceeded 3 minutes loading! Logging out & skipping to next agent...');
+                        // Attempt 2 (Current Month filter) also exceeded 3 minutes -> Logout & Skip to Next Agent!
+                        console.error('❌ Autopilot: Attempt 2 (Current Month filter) also exceeded 3 minutes loading! Logging out & skipping to next agent...');
                         const nextIndex = (res.autopilot_index + 1) % (res.autopilot_agents ? res.autopilot_agents.length : 1);
                         const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                         chrome.storage.local.set({ 
@@ -6103,8 +6108,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             }
                         });
                     } else {
-                        // Attempt 1 (2-Month filter) exceeded 3 minutes -> Reload & try Attempt 2 (1-Month filter)
-                        console.warn('⚠️ Autopilot: Attempt 1 (2-Month filter) exceeded 3 minutes loading! Reloading to try Attempt 2 (1-Month filter)...');
+                        // Attempt 1 (1-Month filter) exceeded 3 minutes -> Reload & try Attempt 2 (Current Month filter)
+                        console.warn('⚠️ Autopilot: Attempt 1 (1-Month filter) exceeded 3 minutes loading! Reloading to try Attempt 2 (Current Month filter)...');
                         chrome.storage.local.set({ 
                             autopilot_last_active_time: Date.now(),
                             autopilot_account_attempts: 1
