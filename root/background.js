@@ -481,6 +481,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'PING') {
     sendResponse({ type: 'PONG' });
   }
+  else if (message.type === 'LOG_FETCH') {
+    logSyncToSupabase(message.payload.status || 'FETCHING', message.payload.total || 0, message.payload.uploaded || 0, message.payload.error || null);
+  }
   else if (message.type === 'FETCH_AGENTS') {
     chrome.storage.local.get(['favExtId'], function (res) {
       const extId = res.favExtId || '';

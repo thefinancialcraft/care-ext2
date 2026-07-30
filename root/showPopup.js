@@ -2596,6 +2596,12 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     const extractRenewalTableData = () => {
       extensionGlobalActive = true; // 🛡️ Force globally active before starting
 
+      try {
+          chrome.runtime.sendMessage({ type: 'LOG_FETCH', payload: { status: 'FETCHING' } });
+      } catch (e) {
+          console.warn('Failed to send LOG_FETCH message:', e);
+      }
+
       // Save exact date filter inputs from DOM
       const domFrom = document.getElementById('from_date')?.value?.trim();
       const domTo = document.getElementById('to_date')?.value?.trim();
