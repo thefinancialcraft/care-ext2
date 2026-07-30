@@ -6038,7 +6038,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         const elapsed = Date.now() - autopilot5sTimer;
                         if (elapsed >= 10000) {
                             const attempts = res.autopilot_account_attempts || 0;
-                            const monthsToFilter = attempts >= 2 ? 1 : 2; // Fallback to 1-Month on 3rd attempt (after 2 reloads)
+                            const monthsToFilter = attempts >= 1 ? 1 : 2; // Fallback to 1-Month on 2nd attempt (after 1 reload)
                             console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter}-Month filter (Attempt ${attempts + 1})...`);
                             autopilotState = 'TRIGGER_2M_FILTER';
                             autopilotFilterTriggerTime = Date.now();
