@@ -1448,7 +1448,7 @@
                         setTimeout(function() {
                             window.location.hash = '#/auth/login';
                         }, 3000);
-                    } else if (txt.toLowerCase().includes('please enter valid otp') || txt.toLowerCase().includes('valid otp') || txt.toLowerCase().includes('invalid otp')) {
+                    } else if (txt.toLowerCase().includes('please enter valid otp') || txt.toLowerCase().includes('valid otp') || txt.toLowerCase().includes('invalid otp') || txt.toLowerCase().includes('conflict with recovery') || txt.toLowerCase().includes('replica disconnect')) {
                         if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Re-fetching latest OTP first...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
@@ -1712,7 +1712,7 @@
             var errEl = document.querySelector('.error-message.text-center, .error-message, div.alert-danger');
             if (errEl) {
                 var errText = (errEl.innerText || errEl.textContent || '').toLowerCase();
-                if (errText.includes('please enter valid otp') || errText.includes('invalid otp') || errText.includes('valid otp')) {
+                if (errText.includes('please enter valid otp') || errText.includes('invalid otp') || errText.includes('valid otp') || errText.includes('conflict with recovery') || errText.includes('replica disconnect')) {
                     var isAlreadyHandlingInvalidOtp = popup && popup.dataset && popup.dataset.handlingInvalidOtp === 'true';
                     if (!isAlreadyHandlingInvalidOtp) {
                         if (popup) popup.dataset.handlingInvalidOtp = 'true';
