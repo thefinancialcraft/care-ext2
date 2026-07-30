@@ -2300,7 +2300,8 @@ const createCustomMonthActionUI = (monthsBack) => {
             for (let selector of quickSelectors) {
                 const el = document.querySelector(selector);
                 const text = el?.innerText?.trim();
-                if (text && text !== 'Fetching name...' && text.toLowerCase() !== 'agent') {
+                const lowerText = text ? text.toLowerCase() : '';
+                if (text && text !== 'Fetching name...' && lowerText !== 'agent' && !lowerText.includes('system')) {
                     const cleanedName = text.replace(/\s+/g, ' '); 
                     console.log('✅ Name found via:', selector);
                     nameSpan.innerText = cleanedName;
@@ -2336,18 +2337,9 @@ const createCustomMonthActionUI = (monthsBack) => {
                 // Wait for page load/navigation and retry
                 setTimeout(attemptFetch, 2500); 
             } else {
-                // 🚀 3. Max attempts reached (5 attempts failed)
-                console.warn('⚠️ Could not fetch specific agent name after 5 attempts. Using fallback: System User');
-                nameSpan.innerText = 'System User'; 
-                spinner.style.display = 'none';
-                buttonContainer.style.display = 'flex';
-                updateMinimizedStatus();
-                removeInitialOverlay();
-                isNameFetchComplete = true; // ✅ Max attempts hit, cleanup can start
-                
-                // Return to dashboard gracefully without closing tab
-                const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');
-                dashboardLink?.click();
+                // 🚀 3. Max attempts reached without valid name -> Reload page to retry name fetch!
+                console.warn('⚠️ Agent name fetch failed or resulted in System/System User after 5 attempts! Reloading page to retry...');
+                window.location.reload();
             }
         };
 
