@@ -6076,9 +6076,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
                             setTimeout(() => { extractRenewalTableData(); }, 10000);
                         } else {
-                            // ✅ Keep refreshing last_active so watchdog doesn't fire while spinner is legitimately loading
-                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
-                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for load to finish...');
+                            // ⏳ Do NOT refresh last_active while spinner is active, so 3-min hard timeout measures exact load time from filter click!
+                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for load to finish (Max 3m)...');
                         }
                     }
                     // === STATE: START_EXTRACTION (terminal - extraction is running) ===
@@ -6088,17 +6087,39 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     }
                 }
 
-                // 3. Watchdog Check (Reload page if inactive for 3 minutes)
+                // 3. Watchdog Check (Reload page or skip agent if loading/inactivity > 3 minutes)
                 const lastActive = res.autopilot_last_active_time || Date.now();
-                if (Date.now() - lastActive > 180000) {
-                    const nextAttempt = (res.autopilot_account_attempts || 0) + 1;
-                    console.log(`⚠️ Autopilot: Watchdog timeout! Reloading page for Attempt ${nextAttempt + 1}...`);
-                    chrome.storage.local.set({ 
-                        autopilot_last_active_time: Date.now(),
-                        autopilot_account_attempts: nextAttempt
-                    }, () => {
-                        window.location.reload();
-                    });
+                if (Date.now() - lastActive > 180000) { // 3 Minutes (180,000ms) Hard Timeout
+                    const currentAttempts = res.autopilot_account_attempts || 0;
+                    if (currentAttempts >= 1) {
+                        // Attempt 2 (1-Month filter) also exceeded 3 minutes -> Logout & Skip to Next Agent!
+                        console.error('❌ Autopilot: Attempt 2 (1-Month filter) also exceeded 3 minutes loading! Logging out & skipping to next agent...');
+                        const nextIndex = (res.autopilot_index + 1) % (res.autopilot_agents ? res.autopilot_agents.length : 1);
+                        const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                        chrome.storage.local.set({ 
+                            autopilot_index: nextIndex,
+                            autopilot_account_attempts: 0,
+                            autopilot_last_active_time: Date.now(),
+                            autopilot_next_login_time: Date.now() + delayMs
+                        }, () => {
+                            const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                            if (logoutBtn) {
+                                logoutBtn.click();
+                            } else {
+                                window.location.hash = '#/auth/login';
+                                window.location.reload();
+                            }
+                        });
+                    } else {
+                        // Attempt 1 (2-Month filter) exceeded 3 minutes -> Reload & try Attempt 2 (1-Month filter)
+                        console.warn('⚠️ Autopilot: Attempt 1 (2-Month filter) exceeded 3 minutes loading! Reloading to try Attempt 2 (1-Month filter)...');
+                        chrome.storage.local.set({ 
+                            autopilot_last_active_time: Date.now(),
+                            autopilot_account_attempts: 1
+                        }, () => {
+                            window.location.reload();
+                        });
+                    }
                 }
             }
         });
