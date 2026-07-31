@@ -616,9 +616,173 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let unlockedExtensions = false;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'FETCH_EMPLOYEES_FROM_SUPABASE') {
+    const SUPABASE_EMPLOYEES_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/employees?select=employeeId,employeeName,employeeType';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    console.log('🔍 Fetching employees from Supabase...');
+    console.log('🌐 URL:', SUPABASE_EMPLOYEES_URL);
+
+    fetch(SUPABASE_EMPLOYEES_URL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=representation'
+      }
+    })
+      .then(res => {
+        console.log('📡 Response status:', res.status, res.statusText);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => {
+        console.log('📊 Raw employees data received:', data);
+        console.log('📊 Data type:', typeof data);
+        console.log('📊 Data length:', Array.isArray(data) ? data.length : 'not an array');
+        
+        // Handle object format with numeric keys
+        let employeesArray = [];
+        if (Array.isArray(data)) {
+          employeesArray = data;
+        } else if (typeof data === 'object' && data !== null) {
+          // Convert object with numeric keys to array
+          employeesArray = Object.values(data).filter(item => item && item.employeeId);
+          console.log('🔄 Converted object to array:', employeesArray);
+        }
+        
+        console.log('📊 Final employees array:', employeesArray);
+        console.log('📊 Final employees count:', employeesArray.length);
+        
+        sendResponse({ success: true, data: employeesArray });
+      })
+      .catch(err => {
+        console.error('❌ Error fetching employees:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'FETCH_AGENT_CODES_FROM_SUPABASE') {
+    const SUPABASE_AGENT_CODES_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/agent_codes?select=agent_id,agent_name';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    console.log('🔍 Fetching agent codes from Supabase...');
+    console.log('🌐 URL:', SUPABASE_AGENT_CODES_URL);
+
+    fetch(SUPABASE_AGENT_CODES_URL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=representation'
+      }
+    })
+      .then(res => {
+        console.log('📡 Response status:', res.status, res.statusText);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => {
+        console.log('📊 Raw agent codes data received:', data);
+        console.log('📊 Data type:', typeof data);
+        console.log('📊 Data length:', Array.isArray(data) ? data.length : 'not an array');
+        
+        // Handle object format with numeric keys
+        let agentCodesArray = [];
+        if (Array.isArray(data)) {
+          agentCodesArray = data;
+        } else if (typeof data === 'object' && data !== null) {
+          // Convert object with numeric keys to array
+          agentCodesArray = Object.values(data).filter(item => item && item.agent_id);
+          console.log('🔄 Converted object to array:', agentCodesArray);
+        }
+        
+        console.log('📊 Final agent codes array:', agentCodesArray);
+        console.log('📊 Final agent codes count:', agentCodesArray.length);
+        
+        sendResponse({ success: true, data: agentCodesArray });
+      })
+      .catch(err => {
+        console.error('❌ Error fetching agent codes:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'CHECK_PROPOSAL_EXISTS_IN_SUPABASE') {
+    const proposalNo = message.proposalNumber;
+    const SUPABASE_SELECT_URL = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/proposals?proposal_number=eq.${proposalNo}&select=id,employee_id`;
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    fetch(SUPABASE_SELECT_URL, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        // Consider it already mapped if the row exists in the database at all
+        const exists = Array.isArray(data) && data.length > 0;
+        sendResponse({ success: true, exists: exists });
+      })
+      .catch(err => {
+        console.error('❌ Error checking proposal mapped status:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
   if (message.type === 'SAVE_PROPOSAL_TO_SUPABASE') {
     const SUPABASE_PROPOSALS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/proposals?on_conflict=proposal_number';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    const p = message.payload || {};
+    const proposalRow = {
+      id: p.id,
+      proposal_number: p.proposal_number?.toString().trim() || null,
+      company_name: p.company_name?.toString().trim() || null,
+      proposer_name: p.proposer_name?.toString().trim() || null,
+      phone_number: p.phone_number?.toString().trim() || null,
+      email_id: p.email_id?.toString().trim() || null,
+      plan_name: p.plan_name?.toString().trim() || null,
+      tenure: p.tenure?.toString().trim() || null,
+      sum_insured: p.sum_insured?.toString().trim() || null,
+      insured_members: p.insured_members?.toString().trim() || null,
+      amount_payable: p.amount_payable?.toString().trim() || null,
+      proposal_summary: p.proposal_summary || null,
+      payment_link: (p.payment_link || p.page_url || '').toString().trim() || null,
+      net_premium: p.net_premium?.toString().trim() || null,
+      tenure_deduction_percent: p.tenure_deduction_percent?.toString().trim() || null,
+      tenure_deduction_amount: p.tenure_deduction_amount?.toString().trim() || null,
+      tenure_adjusted_premium: p.tenure_adjusted_premium?.toString().trim() || null,
+      discount_value: p.discount_value?.toString().trim() || null,
+      discount_unit: p.discount_unit?.toString().trim() || null,
+      discount_type: p.discount_type?.toString().trim() || null,
+      discount_amount: p.discount_amount?.toString().trim() || null,
+      updated_premium: p.updated_premium?.toString().trim() || null,
+      employee_id: p.employee_id?.toString().trim() || null,
+      employee_name: p.employee_name?.toString().trim() || null,
+      team_name: p.team_leader_name?.toString().trim() || null,
+      team_leader: p.team_leader?.toString().trim() || null,
+      agent_code: p.agent_code?.toString().trim() || null,
+      agent_code_name: p.agent_code_name?.toString().trim() || null,
+      assistant_team_name: p.assistant_team_leader_name?.toString().trim() || null,
+      assistant_team_leader: p.assistant_team_leader?.toString().trim() || null,
+      source_type: p.source_type?.toString().trim() || null,
+      outsource_type: p.outsource_type?.toString().trim() || null,
+      payment_date: p.payment_date?.toString().trim() || null,
+      payment_month: p.payment_month?.toString().trim() || null,
+      updated_at: new Date().toISOString()
+    };
 
     fetch(SUPABASE_PROPOSALS_URL, {
       method: 'POST',
@@ -628,7 +792,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         'Authorization': `Bearer ${SUPABASE_KEY}`,
         'Prefer': 'resolution=merge-duplicates'
       },
-      body: JSON.stringify([message.payload])
+      body: JSON.stringify([proposalRow])
     })
       .then(res => res.text())
       .then(data => sendResponse({ success: true, response: data }))

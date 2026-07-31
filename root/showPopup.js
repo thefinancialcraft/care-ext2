@@ -1,4 +1,5 @@
 (function () {
+    console.log("🚀 [showPopup.js] Script initialized and running!");
     // 🛡️ STOP IF ORPHANED: Check if chrome context is already invalidated
     if (!chrome.runtime?.id) {
        console.error('Extension context is invalidated. Refresh the page to continue.');
@@ -2763,6 +2764,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             cellCounter++;
                         }
                     });
+                    const linkEl = row.querySelector('a');
+                    rowData['PAYMENT_LINK'] = linkEl ? linkEl.href : '';
                     rowData['AGENT_NAME'] = agentName;
                     rowData['isUploaded'] = false;
                     tableData.push(rowData);
@@ -5272,6 +5275,28 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         };
         loadIconCDN();
 
+        // Inject Spinner CSS Keyframes dynamically
+        if (!document.getElementById('prop-map-spinner-style')) {
+            const style = document.createElement('style');
+            style.id = 'prop-map-spinner-style';
+            style.textContent = `
+                @keyframes prop-map-spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                .prop-map-spinner {
+                    width: 12px;
+                    height: 12px;
+                    border: 2px solid #fff;
+                    border-top: 2px solid transparent;
+                    border-radius: 50%;
+                    animation: prop-map-spin 1s linear infinite;
+                    display: inline-block;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
         const header = document.createElement('div');
         header.style.cssText = 'display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:12px; margin-bottom:2px; cursor:move; user-select:none;';
         header.innerHTML = '\
@@ -5297,10 +5322,12 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     <div style="font-size:10px; opacity:0.6; color:#ccc;">Proposal Number</div>\
                     <div id="prop-val-num" style="font-size:15px; font-weight:700; color:#4caf50; letter-spacing:0.5px; margin-top:2px;">Searching...</div>\
                 </div>\
-                <button id="btn-map-proposal-data" title="Map & Upload to Supabase" style="background:#4caf50; border:none; color:#fff; border-radius:8px; padding:6px 12px; font-size:11px; font-weight:700; cursor:pointer; display:flex; align-items:center; gap:5px; transition:all 0.2s; box-shadow:0 4px 12px rgba(76, 175, 80, 0.3);">\
-                    <i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i>\
-                    <span>Map Data</span>\
-                </button>\
+                <div id="btn-map-wrapper" style="position:relative; display:inline-block;">\
+                    <button id="btn-map-proposal-data" disabled title="Checking status..." style="background:#555555; border:none; color:#fff; border-radius:8px; padding:6px 12px; font-size:11px; font-weight:700; cursor:wait; display:flex; align-items:center; gap:5px; transition:all 0.2s; box-shadow:none; pointer-events:none;">\
+                        <div class="prop-map-spinner"></div>\
+                        <span>Checking...</span>\
+                    </button>\
+                </div>\
             </div>\
             <div id="prop-grid-details" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:0px; max-height:0px; opacity:0; transition:all 0.5s ease; overflow:hidden;">\
                 <div style="background:rgba(255,255,255,0.03); padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05); grid-column: span 2;">\
@@ -5391,6 +5418,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         const btnShrink = document.getElementById('btn-toggle-shrink-popup');
         if (btnShrink) {
             btnShrink.onclick = (e) => {
+                console.log('🖱️ [showPopup.js] Expand/Collapse button clicked! isManuallyShrunk state changing to:', !isManuallyShrunk);
                 e.stopPropagation();
                 const gridBox = document.getElementById('prop-grid-details');
                 const iconSvg = document.getElementById('shrink-icon-svg');
@@ -5411,92 +5439,6 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     }
                     if (iconSvg) iconSvg.style.transform = 'rotate(0deg)';
                 }
-            };
-        }
-
-        const btnMap = document.getElementById('btn-map-proposal-data');
-        if (btnMap) {
-            btnMap.onclick = (e) => {
-                e.stopPropagation();
-                btnMap.disabled = true;
-                btnMap.innerHTML = '<span style="opacity:0.8;">Mapping...</span>';
-                btnMap.style.background = '#0065b3';
-
-                const elNum = document.getElementById('prop-val-num');
-                const num = elNum ? elNum.innerText.replace('Searching...', '').trim() : '';
-
-                const pName = getWidgetVal('Proposer Details', 'Name');
-                const pPhone = getWidgetVal('Proposer Details', 'Phone Number');
-                const pEmail = getWidgetVal('Proposer Details', 'Email ID') || getWidgetVal('Proposer Details', 'Email');
-
-                const pPlan = getWidgetVal('Product Details', 'Plan Name');
-                const pTenure = getWidgetVal('Product Details', 'Tenure');
-                const pSi = getWidgetVal('Product Details', 'Sum Insured');
-                const pMembers = getInsuredMemberCount();
-                
-                let pAmount = '';
-                const payRow = document.querySelector('.payment-row h4 span, .payment-row span');
-                if (payRow) pAmount = payRow.innerText.trim();
-                if (!pAmount) pAmount = getWidgetVal('Product Details', 'Premium Amount');
-
-                let summaryHtml = '';
-                const propSecBtn = document.querySelector('.proposal-sec');
-                if (propSecBtn) {
-                    const clonedBtn = propSecBtn.cloneNode(true);
-                    clonedBtn.querySelectorAll('.term-cond').forEach(el => {
-                        const parentCard = el.closest('.proposal-card');
-                        if (parentCard) parentCard.remove();
-                        else el.remove();
-                    });
-                    summaryHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Proposal Summary</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px}.proposal-sec{display:flex;flex-direction:column;gap:16px}.proposal-card{background:#ffffff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:18px 20px!important;margin-bottom:16px!important;color:#1e293b!important;box-shadow:0 4px 12px rgba(0,0,0,.03)!important}.header-sec{font-size:15px!important;font-weight:700!important;color:#0065b3!important;border-bottom:1px solid #f1f5f9!important;padding-bottom:10px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important}.row{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))!important;gap:12px!important;margin-bottom:12px!important}.widget-col{background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:10px 14px!important;border-radius:10px!important;display:flex!important;flex-direction:column!important;gap:4px!important}.widget-col h3{font-size:10px!important;color:#64748b!important;margin:0!important;text-transform:uppercase!important;letter-spacing:.5px!important}.widget-col span{font-size:13px!important;color:#0f172a!important;font-weight:600!important;word-break:break-word!important}h1,h2{grid-column:1/-1!important;font-size:13px!important;color:#0284c7!important;margin:8px 0 4px!important;font-weight:700!important}ul{grid-column:1/-1!important;list-style:none!important;padding:0!important;margin:0!important;display:flex!important;flex-wrap:wrap!important;gap:8px!important}li{background:#e0f2fe!important;padding:6px 12px!important;border-radius:20px!important;font-size:12px!important;color:#0369a1!important;border:1px solid #bae6fd!important;display:flex!important;align-items:center!important}.payment-row{background:#f0fdf4!important;border:1px solid #bbf7d0!important;font-size:16px!important;font-weight:700!important;color:#166534!important;display:flex!important;justify-content:space-between!important;align-items:center!important;border-radius:14px!important;padding:18px 20px!important}.payment-row h4{margin:0!important;font-size:16px!important;color:#0f172a!important;display:flex!important;width:100%!important;justify-content:space-between!important;align-items:center!important}.payment-row h4 span{font-size:18px!important;color:#15803d!important;font-weight:800!important}</style></head><body>${clonedBtn.outerHTML}</body></html>`;
-                }
-
-                if (!num) {
-                    btnMap.innerHTML = '❌ No Prop No!';
-                    btnMap.style.background = '#f44336';
-                    setTimeout(() => {
-                        btnMap.innerHTML = '<i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i><span>Map Data</span>';
-                        btnMap.style.background = '#4caf50';
-                        btnMap.disabled = false;
-                    }, 2500);
-                    return;
-                }
-
-                const genId = (seed) => {
-                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-                    let hash = 0;
-                    for (let i = 0; i < seed.length; i++) { hash = (hash * 31 + seed.charCodeAt(i)) >>> 0; }
-                    let result = '';
-                    for (let i = 0; i < 12; i++) { hash = (hash * 1664525 + 1013904223) >>> 0; result += chars[hash % 62]; }
-                    return result;
-                };
-
-                chrome.runtime.sendMessage({
-                    type: 'SAVE_PROPOSAL_TO_SUPABASE',
-                    payload: {
-                        id: genId(num || Date.now().toString()),
-                        proposal_number: num,
-                        company_name: 'Care Health Insurance',
-                        proposer_name: pName,
-                        phone_number: pPhone,
-                        email_id: pEmail,
-                        plan_name: pPlan,
-                        tenure: pTenure,
-                        sum_insured: pSi,
-                        insured_members: pMembers,
-                        amount_payable: pAmount,
-                        proposal_summary: summaryHtml
-                    }
-                }, (resp) => {
-                    console.log('📡 Manual Map Data Upload to Supabase:', resp);
-                    btnMap.innerHTML = '✓ Mapped!';
-                    btnMap.style.background = '#2e7d32';
-                    setTimeout(() => {
-                        btnMap.innerHTML = '<i class="fi flex fi-rr-map-marker" style="font-size:12px;"></i><span>Map Data</span>';
-                        btnMap.style.background = '#4caf50';
-                        btnMap.disabled = false;
-                    }, 2500);
-                });
             };
         }
 
@@ -5544,6 +5486,883 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             return '';
         };
 
+        const buildProposalSummaryHtml = () => {
+            const propSec = document.querySelector('.proposal-sec');
+            if (!propSec) return '';
+            const cloned = propSec.cloneNode(true);
+            cloned.querySelectorAll('.term-cond').forEach(el => {
+                const parentCard = el.closest('.proposal-card');
+                if (parentCard) parentCard.remove();
+                else el.remove();
+            });
+            return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Proposal Summary</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px}.proposal-sec{display:flex;flex-direction:column;gap:16px}.proposal-card{background:#ffffff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:18px 20px!important;margin-bottom:16px!important;color:#1e293b!important;box-shadow:0 4px 12px rgba(0,0,0,.03)!important}.header-sec{font-size:15px!important;font-weight:700!important;color:#0065b3!important;border-bottom:1px solid #f1f5f9!important;padding-bottom:10px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important}.row{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))!important;gap:12px!important;margin-bottom:12px!important}.widget-col{background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:10px 14px!important;border-radius:10px!important;display:flex!important;flex-direction:column!important;gap:4px!important}.widget-col h3{font-size:10px!important;color:#64748b!important;margin:0!important;text-transform:uppercase!important;letter-spacing:.5px!important}.widget-col span{font-size:13px!important;color:#0f172a!important;font-weight:600!important;word-break:break-word!important}h1,h2{grid-column:1/-1!important;font-size:13px!important;color:#0284c7!important;margin:8px 0 4px!important;font-weight:700!important}ul{grid-column:1/-1!important;list-style:none!important;padding:0!important;margin:0!important;display:flex!important;flex-wrap:wrap!important;gap:8px!important}li{background:#e0f2fe!important;padding:6px 12px!important;border-radius:20px!important;font-size:12px!important;color:#0369a1!important;border:1px solid #bae6fd!important;display:flex!important;align-items:center!important}.payment-row{background:#f0fdf4!important;border:1px solid #bbf7d0!important;font-size:16px!important;font-weight:700!important;color:#166534!important;display:flex!important;justify-content:space-between!important;align-items:center!important;border-radius:14px!important;padding:18px 20px!important}.payment-row h4{margin:0!important;font-size:16px!important;color:#0f172a!important;display:flex!important;width:100%!important;justify-content:space-between!important;align-items:center!important}.payment-row h4 span{font-size:18px!important;color:#15803d!important;font-weight:800!important}</style></head><body>${cloned.outerHTML}</body></html>`;
+        };
+
+        const parseProposalMoney = (val) => {
+            if (val === undefined || val === null || val === '') return 0;
+            const n = parseFloat(String(val).replace(/[^\d.]/g, ''));
+            return isNaN(n) ? 0 : n;
+        };
+
+        const formatProposalMoney = (n) => {
+            if (!Number.isFinite(n)) return '';
+            return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        };
+
+        const proposalGenId = (seed) => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let hash = 0;
+            for (let i = 0; i < seed.length; i++) { hash = (hash * 31 + seed.charCodeAt(i)) >>> 0; }
+            let result = '';
+            for (let i = 0; i < 12; i++) { hash = (hash * 1664525 + 1013904223) >>> 0; result += chars[hash % 62]; }
+            return result;
+        };
+
+        const collectProposalMapDraft = () => {
+            const elNum = document.getElementById('prop-val-num');
+            let num = elNum ? elNum.innerText.replace('Searching...', '').trim() : '';
+            if (!num) {
+                const spanEls = document.querySelectorAll('.title span, div.title span, h1 + span, .proposal-no, span');
+                for (let el of spanEls) {
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    const match = txt.match(/Proposal\s*Number\s*[:\s]*(\d+)/i);
+                    if (match && match[1]) { num = match[1]; break; }
+                }
+            }
+
+            let pAmount = '';
+            const payRow = document.querySelector('.payment-row h4 span, .payment-row span');
+            if (payRow) pAmount = payRow.innerText.trim();
+            if (!pAmount) pAmount = getWidgetVal('Product Details', 'Premium Amount');
+
+            return {
+                num,
+                pName: getWidgetVal('Proposer Details', 'Name'),
+                pPhone: getWidgetVal('Proposer Details', 'Phone Number'),
+                pEmail: getWidgetVal('Proposer Details', 'Email ID') || getWidgetVal('Proposer Details', 'Email'),
+                pPlan: getWidgetVal('Product Details', 'Plan Name'),
+                pTenure: getWidgetVal('Product Details', 'Tenure'),
+                pSi: getWidgetVal('Product Details', 'Sum Insured'),
+                pMembers: getInsuredMemberCount(),
+                pAmount,
+                summaryHtml: buildProposalSummaryHtml()
+            };
+        };
+
+        const computeProposalPremiums = (amountPayableStr, discountValStr, discountUnit, tenure) => {
+            const gross = parseProposalMoney(amountPayableStr);
+            const netPremium = gross > 0 ? gross / 1.18 : 0;
+            
+            // Calculate tenure deduction
+            let tenureMultiplier = 1;
+            let tenureDeductionPercent = 0;
+            const tenureLower = String(tenure || '').toLowerCase();
+            if (tenureLower.includes('1') || tenureLower.includes('one')) {
+                tenureMultiplier = 1;
+                tenureDeductionPercent = 0;
+            } else if (tenureLower.includes('2') || tenureLower.includes('two')) {
+                tenureMultiplier = 0.9;
+                tenureDeductionPercent = 10;
+            } else if (tenureLower.includes('3') || tenureLower.includes('three')) {
+                tenureMultiplier = 0.8;
+                tenureDeductionPercent = 20;
+            }
+            
+            const tenureAdjustedPremium = netPremium * tenureMultiplier;
+            const tenureDeductionAmount = netPremium - tenureAdjustedPremium;
+            
+            const discountVal = parseFloat(String(discountValStr).replace(/[^\d.]/g, '')) || 0;
+            let discountBase = 0;
+            if (discountUnit === 'percentage') {
+                discountBase = tenureAdjustedPremium * (discountVal / 100);
+            } else {
+                discountBase = discountVal;
+            }
+            const discountAmount = discountBase * 5;
+            
+            return {
+                netPremium,
+                tenureMultiplier,
+                tenureDeductionPercent,
+                tenureDeductionAmount,
+                tenureAdjustedPremium,
+                discountBase,
+                discountAmount,
+                updatedPremium: Math.max(0, tenureAdjustedPremium - discountAmount)
+            };
+        };
+
+        const wirePropMapCustomDropdown = (root, ddRoot, onChange) => {
+            const hidden = ddRoot.querySelector('input[type="hidden"]');
+            const btn = ddRoot.querySelector('.prop-map-custom-dd-btn');
+            const labelEl = ddRoot.querySelector('.prop-map-custom-dd-label');
+            const menu = ddRoot.querySelector('.prop-map-custom-dd-menu');
+            if (!hidden || !btn || !menu) return;
+
+            const closeAll = () => {
+                root.querySelectorAll('.prop-map-custom-dd.open').forEach(el => el.classList.remove('open'));
+            };
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const wasOpen = ddRoot.classList.contains('open');
+                closeAll();
+                if (!wasOpen) ddRoot.classList.add('open');
+            });
+
+            menu.querySelectorAll('[data-value]').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const val = item.getAttribute('data-value');
+                    const text = item.textContent.trim();
+                    hidden.value = val;
+                    if (labelEl) labelEl.textContent = text;
+                    menu.querySelectorAll('[data-value]').forEach(i => i.classList.toggle('active', i === item));
+                    ddRoot.classList.remove('open');
+                    if (onChange) onChange();
+                });
+            });
+            
+            // Also trigger onChange when hidden input changes programmatically
+            const observer = new MutationObserver(() => {
+                if (onChange) onChange();
+            });
+            observer.observe(hidden, { attributes: true, attributeFilter: ['value'] });
+        };
+
+
+                const openProposalMapDetailsModal = (draft, btnMap) => {
+            console.log('📂 [showPopup.js] openProposalMapDetailsModal called with draft:', draft);
+            try {
+                document.getElementById('proposal-map-details-modal')?.remove();
+
+                const overlay = document.createElement('div');
+                overlay.id = 'proposal-map-details-modal';
+                Object.assign(overlay.style, {
+                    position: 'fixed', inset: '0', zIndex: '2147483647',
+                    background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(6px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '16px', fontFamily: '"Segoe UI", Roboto, sans-serif'
+                });
+
+                const card = document.createElement('div');
+                card.id = 'proposal-map-details-card';
+                Object.assign(card.style, {
+                    width: '100%', maxWidth: '450px', maxHeight: '88vh',
+                    background: 'rgba(30, 58, 95, 0.98)', color: '#fff', borderRadius: '16px',
+                    border: 'none', boxShadow: '0 20px 50px rgba(0,0,0,0.35)',
+                    padding: '22px 24px', overflowY: 'auto'
+                });
+
+                const fieldStyle = 'width:100%;box-sizing:border-box;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:13px;outline:none;';
+                const labelStyle = 'display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.4px;opacity:0.65;margin-bottom:4px;';
+                const initialCalc = computeProposalPremiums(draft.pAmount, '0', 'amount', draft.pTenure);
+
+                card.innerHTML = `
+                <style>
+                    /* Thin scrollbar for Card */
+                    #proposal-map-details-card::-webkit-scrollbar {
+                        width: 5px;
+                    }
+                    #proposal-map-details-card::-webkit-scrollbar-track {
+                        background: #555555; /* Solid gray track */
+                        border-radius: 8px;
+                        margin-top: 12px;   /* Prevents overflow beyond top rounded corners */
+                        margin-bottom: 12px;/* Prevents overflow beyond bottom rounded corners */
+                    }
+                    #proposal-map-details-card::-webkit-scrollbar-thumb {
+                        background: #ffffff; /* Solid white thumb */
+                        border-radius: 8px;
+                    }
+                    #proposal-map-details-card::-webkit-scrollbar-thumb:hover {
+                        background: #eeeeee;
+                    }
+
+                    /* Thin scrollbar for Searchable Dropdowns */
+                    .sdd-menu::-webkit-scrollbar {
+                        width: 4px;
+                    }
+                    .sdd-menu::-webkit-scrollbar-track {
+                        background: #555555; /* Solid gray track */
+                        border-radius: 6px;
+                    }
+                    .sdd-menu::-webkit-scrollbar-thumb {
+                        background: #ffffff; /* Solid white thumb */
+                        border-radius: 6px;
+                    }
+                    .sdd-menu::-webkit-scrollbar-thumb:hover {
+                        background: #eeeeee;
+                    }
+
+                    .prop-map-dd-item:hover, .prop-map-sdd-item:hover { background: rgba(255,255,255,0.1) !important; }
+                </style>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:10px;">
+                    <div>
+                        <div style="font-size:11px;opacity:0.65;">Proposal #${draft.num}</div>
+                        <h3 style="margin:4px 0 0;font-size:17px;font-weight:700;">Remaining Details</h3>
+                    </div>
+                    <button type="button" id="prop-map-modal-close" style="background:rgba(255,255,255,0.12);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;">×</button>
+                </div>
+                
+                <!-- Custom Interactive Date Display Area -->
+                <div style="position:relative; margin-bottom:14px;">
+                    <div id="prop-map-date-display-container" style="background:rgba(255,255,255,0.06); padding:12px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+                        <div>
+                            <div style="font-size:10px; opacity:0.6; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px;">Payment Date & Month</div>
+                            <div id="prop-map-date-text" style="font-size:14px; font-weight:700; color:#4caf50;">
+                                Loading Date...
+                            </div>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.12); padding:6px 10px; border-radius:6px; font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity:0.8;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                            <span>Change Date</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Hidden fields to hold actual values -->
+                    <input type="hidden" id="prop-map-payment-date" value="">
+                    <input type="hidden" id="prop-map-payment-month" value="">
+                    
+                    <!-- Custom Inline Calendar Dropdown -->
+                    <div id="prop-map-calendar-dropdown" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,0.5); user-select:none;">
+                        <!-- Calendar Header (Month Year and Navigation) -->
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <button type="button" id="cal-prev-month" style="background:transparent; border:none; color:#fff; cursor:pointer; font-size:16px; padding:4px 8px; font-weight:bold;">&lt;</button>
+                            <span id="cal-month-year-label" style="font-size:13px; font-weight:700; color:#fff;">August 2026</span>
+                            <button type="button" id="cal-next-month" style="background:transparent; border:none; color:#fff; cursor:pointer; font-size:16px; padding:4px 8px; font-weight:bold;">&gt;</button>
+                        </div>
+                        <!-- Days of Week Header -->
+                        <div style="display:grid; grid-template-columns:repeat(7, 1fr); text-align:center; font-size:11px; font-weight:600; opacity:0.5; margin-bottom:6px;">
+                            <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+                        </div>
+                        <!-- Days Grid -->
+                        <div id="cal-days-grid" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:4px; text-align:center; font-size:12px;">
+                            <!-- Dynamically generated days -->
+                        </div>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px;">
+                    <div style="grid-column:span 2;">
+                        <label style="${labelStyle}">Amount Payable (from page)</label>
+                        <input id="prop-map-amount-payable" readonly style="${fieldStyle}opacity:0.85;" value="${(String(draft.pAmount || '')).replace(/"/g, '&quot;')}">
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Net Premium ( −18% GST )</label>
+                        <input id="prop-map-net-premium" readonly style="${fieldStyle}opacity:0.85;" value="${formatProposalMoney(initialCalc.netPremium)}">
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Tenure Deduction</label>
+                        <div id="prop-map-tenure-deduction" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#ff9800;font-weight:600;display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+                            <span>${initialCalc.tenureDeductionPercent > 0 ? formatProposalMoney(initialCalc.tenureDeductionAmount) + ' (' + initialCalc.tenureDeductionPercent + '%)' : 'No deduction'}</span>
+                            <div style="background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px;font-size:10px;color:rgba(255,255,255,0.9);">${draft.pTenure || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="${labelStyle}">Premium After Tenure Deduction</label>
+                        <input id="prop-map-tenure-adjusted-premium" readonly style="${fieldStyle}opacity:0.85;color:#2196f3;font-weight:600;" value="${formatProposalMoney(initialCalc.tenureAdjustedPremium)}">
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Discount</label>
+                        <input id="prop-map-discount" type="number" min="0" step="any" placeholder="0" style="${fieldStyle}">
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Discount As</label>
+                        <div class="custom-dropdown" id="dd-discount-unit" style="position:relative;">
+                            <input type="hidden" id="prop-map-discount-unit" value="amount">
+                            <div class="dd-trigger" style="${fieldStyle} cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                                <span class="dd-label">Flat Amount (₹)</span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </div>
+                            <div class="dd-menu" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                <div class="prop-map-dd-item dd-item" data-value="amount" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Flat Amount (₹)</div>
+                                <div class="prop-map-dd-item dd-item" data-value="percentage" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Percentage (%)</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="${labelStyle}">Discount Amount (calc ×5)</label>
+                        <input id="prop-map-discount-amount" readonly style="${fieldStyle}opacity:0.85;" value="0.00">
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="${labelStyle}">Final Premium (after discount)</label>
+                        <input id="prop-map-updated-premium" readonly style="${fieldStyle}opacity:0.85;color:#4caf50;font-weight:700;" value="${formatProposalMoney(initialCalc.updatedPremium)}">
+                    </div>
+                    <div style="grid-column:span 2;">
+                        <label style="${labelStyle}">Discount Type</label>
+                        <div class="custom-dropdown" id="dd-discount-type" style="position:relative;">
+                            <input type="hidden" id="prop-map-discount-type" value="">
+                            <div class="dd-trigger" style="${fieldStyle} cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                                <span class="dd-label">Select type</span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </div>
+                            <div class="dd-menu" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                <div class="prop-map-dd-item dd-item" data-value="" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">None</div>
+                                <div class="prop-map-dd-item dd-item" data-value="payu" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">PayU</div>
+                                <div class="prop-map-dd-item dd-item" data-value="cashback" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Cashback</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="grid-column:span 2; display:flex; gap:10px; align-items:flex-end;">
+                        <div style="flex:1;">
+                            <label style="${labelStyle}">Source Type</label>
+                            <div class="custom-dropdown" id="dd-source-type" style="position:relative;">
+                                <input type="hidden" id="prop-map-source-type" value="">
+                                <div class="dd-trigger" style="${fieldStyle} cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="dd-label">Select Source</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="dd-menu" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                    <div class="prop-map-dd-item dd-item" data-value="" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">None</div>
+                                    <div class="prop-map-dd-item dd-item" data-value="inhouse" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Inhouse</div>
+                                    <div class="prop-map-dd-item dd-item" data-value="outsource" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Outsource</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="prop-map-outsource-sub-container" style="flex:1; display:none;">
+                            <label style="${labelStyle}">Outsource Option</label>
+                            <div class="custom-dropdown" id="dd-outsource-type" style="position:relative;">
+                                <input type="hidden" id="prop-map-outsource-type" value="">
+                                <div class="dd-trigger" style="${fieldStyle} cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                                    <span class="dd-label">Select Option</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                </div>
+                                <div class="dd-menu" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+                                    <div class="prop-map-dd-item dd-item" data-value="" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">None</div>
+                                    <div class="prop-map-dd-item dd-item" data-value="in" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">In</div>
+                                    <div class="prop-map-dd-item dd-item" data-value="out" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Out</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Employee Name</label>
+                        <div class="searchable-dropdown" id="sdd-employee" style="position:relative;">
+                            <input type="hidden" id="prop-map-employee-id" value="">
+                            <input type="text" id="prop-map-employee-search" placeholder="Loading employees..." disabled style="${fieldStyle}">
+                            <div class="sdd-menu" style="display:none; position:absolute; left:0; right:0; bottom:calc(100% + 4px); background:rgba(20, 40, 70, 0.98); border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; max-height:160px; overflow-y:auto; padding:4px;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Team Leader</label>
+                        <div class="searchable-dropdown" id="sdd-team-leader" style="position:relative;">
+                            <input type="hidden" id="prop-map-team-leader" value="">
+                            <input type="text" id="prop-map-team-leader-search" placeholder="Loading team leaders..." disabled style="${fieldStyle}">
+                            <div class="sdd-menu" style="display:none; position:absolute; left:0; right:0; bottom:calc(100% + 4px); background:rgba(20, 40, 70, 0.98); border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; max-height:160px; overflow-y:auto; padding:4px;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Agent Code</label>
+                        <div class="searchable-dropdown" id="sdd-agent-code" style="position:relative;">
+                            <input type="hidden" id="prop-map-agent-code" value="">
+                            <input type="text" id="prop-map-agent-code-search" placeholder="Loading agent codes..." disabled style="${fieldStyle}">
+                            <div class="sdd-menu" style="display:none; position:absolute; left:0; right:0; bottom:calc(100% + 4px); background:rgba(20, 40, 70, 0.98); border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; max-height:160px; overflow-y:auto; padding:4px;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="${labelStyle}">Assistant Team Leader</label>
+                        <div class="searchable-dropdown" id="sdd-assistant-team-leader" style="position:relative;">
+                            <input type="hidden" id="prop-map-assistant-team-leader" value="">
+                            <input type="text" id="prop-map-assistant-team-leader-search" placeholder="Loading assistant team leaders..." disabled style="${fieldStyle}">
+                            <div class="sdd-menu" style="display:none; position:absolute; left:0; right:0; bottom:calc(100% + 4px); background:rgba(20, 40, 70, 0.98); border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; max-height:160px; overflow-y:auto; padding:4px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="prop-map-form-error" style="display:none;color:#ffcdd2;font-size:12px;margin-bottom:10px;font-weight:600;"></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;border-top:1px solid rgba(255,255,255,0.1);padding-top:12px;">
+                    <button type="button" id="prop-map-cancel" style="padding:10px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;cursor:pointer;font-weight:600;font-size:13px;">Cancel</button>
+                    <button type="button" id="prop-map-submit" style="padding:10px 18px;border-radius:8px;border:none;background:#4caf50;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 4px 14px rgba(76,175,80,0.35);font-size:13px;">Submit to Supabase</button>
+                </div>
+                `;
+
+                overlay.appendChild(card);
+                document.body.appendChild(overlay);
+
+                // Initialize and manage custom Date/Month Display Click Handler
+                const dateInput = card.querySelector('#prop-map-payment-date');
+                const monthInput = card.querySelector('#prop-map-payment-month');
+                const dateText = card.querySelector('#prop-map-date-text');
+                const dateDisplayContainer = card.querySelector('#prop-map-date-display-container');
+
+                // Prepopulate today's date (e.g. 01 * August 2026)
+                const today = new Date();
+                const dd = String(today.getDate()).padStart(2, '0');
+                const yyyy = today.getFullYear();
+                const monthsList = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                const mmName = monthsList[today.getMonth()];
+                
+                if (dateInput) {
+                    const mmStr = String(today.getMonth() + 1).padStart(2, '0');
+                    dateInput.value = `${yyyy}-${mmStr}-${dd}`;
+                }
+                if (monthInput) {
+                    monthInput.value = `${mmName} ${yyyy}`;
+                }
+                if (dateText) {
+                    dateText.textContent = `${dd} ${mmName} ${yyyy}`;
+                }
+
+                // Custom Calendar UI Logic and Handlers
+                const calDropdown = card.querySelector('#prop-map-calendar-dropdown');
+                const calMonthYearLabel = card.querySelector('#cal-month-year-label');
+                const calDaysGrid = card.querySelector('#cal-days-grid');
+                const btnCalPrev = card.querySelector('#cal-prev-month');
+                const btnCalNext = card.querySelector('#cal-next-month');
+                
+                let selectedDate = new Date(); // Date object for selected date
+                let currentCalMonth = selectedDate.getMonth(); // Month currently viewed in calendar
+                let currentCalYear = selectedDate.getFullYear(); // Year currently viewed in calendar
+
+                const updateDateFields = (dateObj) => {
+                    const ddVal = String(dateObj.getDate()).padStart(2, '0');
+                    const mmVal = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const yyyyVal = dateObj.getFullYear();
+                    const mmName = monthsList[dateObj.getMonth()];
+
+                    if (dateInput) dateInput.value = `${yyyyVal}-${mmVal}-${ddVal}`;
+                    if (monthInput) monthInput.value = `${mmName} ${yyyyVal}`;
+                    if (dateText) dateText.textContent = `${ddVal} ${mmName} ${yyyyVal}`;
+                };
+
+                const renderCalendar = () => {
+                    calMonthYearLabel.textContent = `${monthsList[currentCalMonth]} ${currentCalYear}`;
+                    calDaysGrid.innerHTML = '';
+
+                    const firstDay = new Date(currentCalYear, currentCalMonth, 1).getDay();
+                    const totalDays = new Date(currentCalYear, currentCalMonth + 1, 0).getDate();
+
+                    // Empty cells for previous month padding
+                    for (let i = 0; i < firstDay; i++) {
+                        const emptySpan = document.createElement('span');
+                        calDaysGrid.appendChild(emptySpan);
+                    }
+
+                    // Render days
+                    for (let dayNum = 1; dayNum <= totalDays; dayNum++) {
+                        const dayBtn = document.createElement('div');
+                        dayBtn.textContent = dayNum;
+                        dayBtn.style.padding = '5px 0';
+                        dayBtn.style.cursor = 'pointer';
+                        dayBtn.style.borderRadius = '4px';
+                        dayBtn.style.transition = 'all 0.15s';
+                        
+                        const isSelected = selectedDate.getDate() === dayNum && 
+                                           selectedDate.getMonth() === currentCalMonth && 
+                                           selectedDate.getFullYear() === currentCalYear;
+
+                        if (isSelected) {
+                            dayBtn.style.background = '#4caf50';
+                            dayBtn.style.color = '#fff';
+                            dayBtn.style.fontWeight = 'bold';
+                        } else {
+                            dayBtn.style.color = '#fff';
+                            dayBtn.addEventListener('mouseenter', () => { dayBtn.style.background = 'rgba(255,255,255,0.15)'; });
+                            dayBtn.addEventListener('mouseleave', () => { dayBtn.style.background = 'transparent'; });
+                        }
+
+                        dayBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            selectedDate = new Date(currentCalYear, currentCalMonth, dayNum);
+                            updateDateFields(selectedDate);
+                            calDropdown.style.display = 'none';
+                        });
+
+                        calDaysGrid.appendChild(dayBtn);
+                    }
+                };
+
+                // Initialize fields to today
+                updateDateFields(selectedDate);
+
+                // Toggle dropdown
+                if (dateDisplayContainer) {
+                    dateDisplayContainer.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // Close any custom dropdown menus first
+                        card.querySelectorAll('.dd-menu, .sdd-menu').forEach(m => m.style.display = 'none');
+                        const isVisible = calDropdown.style.display === 'block';
+                        calDropdown.style.display = isVisible ? 'none' : 'block';
+                        if (!isVisible) {
+                            currentCalMonth = selectedDate.getMonth();
+                            currentCalYear = selectedDate.getFullYear();
+                            renderCalendar();
+                        }
+                    });
+                }
+
+                // Month navigation
+                btnCalPrev.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    currentCalMonth--;
+                    if (currentCalMonth < 0) {
+                        currentCalMonth = 11;
+                        currentCalYear--;
+                    }
+                    renderCalendar();
+                });
+
+                btnCalNext.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    currentCalMonth++;
+                    if (currentCalMonth > 11) {
+                        currentCalMonth = 0;
+                        currentCalYear++;
+                    }
+                    renderCalendar();
+                });
+
+                // Auto-close calendar when clicking anywhere else inside card
+                card.addEventListener('click', (e) => {
+                    if (!e.target.closest('#prop-map-calendar-dropdown') && !e.target.closest('#prop-map-date-display-container')) {
+                        calDropdown.style.display = 'none';
+                    }
+                });
+
+                const refreshCalcs = () => {
+                    const amountStr = document.getElementById('prop-map-amount-payable')?.value || draft.pAmount;
+                    const discountVal = document.getElementById('prop-map-discount')?.value || '0';
+                    const discountUnit = document.getElementById('prop-map-discount-unit')?.value || 'percentage';
+                    const calc = computeProposalPremiums(amountStr, discountVal, discountUnit, draft.pTenure);
+                    
+                    const netEl = document.getElementById('prop-map-net-premium');
+                    const tenureDedEl = document.getElementById('prop-map-tenure-deduction');
+                    const tenureAdjEl = document.getElementById('prop-map-tenure-adjusted-premium');
+                    const discAmtEl = document.getElementById('prop-map-discount-amount');
+                    const updEl = document.getElementById('prop-map-updated-premium');
+                    
+                    if (netEl) netEl.value = formatProposalMoney(calc.netPremium);
+                    if (tenureDedEl) {
+                        const deductionText = calc.tenureDeductionPercent > 0 ? formatProposalMoney(calc.tenureDeductionAmount) + ' (' + calc.tenureDeductionPercent + '%)' : 'No deduction';
+                        const spanEl = tenureDedEl.querySelector('span');
+                        if (spanEl) spanEl.textContent = deductionText;
+                    }
+                    if (tenureAdjEl) tenureAdjEl.value = formatProposalMoney(calc.tenureAdjustedPremium);
+                    if (discAmtEl) discAmtEl.value = formatProposalMoney(calc.discountAmount);
+                    if (updEl) updEl.value = formatProposalMoney(calc.updatedPremium);
+                    
+                    const discountInput = document.getElementById('prop-map-discount');
+                    if (discountInput && discountUnit === 'amount') {
+                        const maxDiscount = calc.tenureAdjustedPremium / 5;
+                        discountInput.max = Math.max(1, Math.round(maxDiscount * 100) / 100);
+                    }
+
+                    // Source Type dynamic toggle
+                    const sourceType = document.getElementById('prop-map-source-type')?.value;
+                    const outsourceSub = document.getElementById('prop-map-outsource-sub-container');
+                    if (sourceType === 'outsource') {
+                        if (outsourceSub) outsourceSub.style.display = 'block';
+                    } else {
+                        if (outsourceSub) {
+                            outsourceSub.style.display = 'none';
+                            const subInput = document.getElementById('prop-map-outsource-type');
+                            if (subInput) {
+                                subInput.value = '';
+                                const subLabel = outsourceSub.querySelector('.dd-label');
+                                if (subLabel) subLabel.textContent = 'Select Option';
+                            }
+                        }
+                    }
+                };
+
+                // Setup Custom Dropdowns
+                const setupCustomDropdown = (containerId, onSelect) => {
+                    const container = card.querySelector(`#${containerId}`);
+                    if (!container) return;
+                    const trigger = container.querySelector('.dd-trigger');
+                    const menu = container.querySelector('.dd-menu');
+                    const hidden = container.querySelector('input[type="hidden"]');
+                    const label = container.querySelector('.dd-label');
+                    const items = container.querySelectorAll('.dd-item');
+
+                    trigger.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        card.querySelectorAll('.dd-menu, .sdd-menu').forEach(m => {
+                            if (m !== menu) m.style.display = 'none';
+                        });
+                        const isOpen = menu.style.display === 'block';
+                        menu.style.display = isOpen ? 'none' : 'block';
+                    });
+
+                    items.forEach(item => {
+                        item.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            const val = item.getAttribute('data-value');
+                            const text = item.textContent;
+                            hidden.value = val;
+                            label.textContent = text;
+                            menu.style.display = 'none';
+                            items.forEach(i => { i.style.background = 'transparent'; });
+                            item.style.background = 'rgba(76, 175, 80, 0.2)';
+                            if (onSelect) onSelect(val);
+                        });
+                    });
+                };
+
+                setupCustomDropdown('dd-discount-unit', () => refreshCalcs());
+                setupCustomDropdown('dd-discount-type');
+                setupCustomDropdown('dd-source-type', () => refreshCalcs());
+                setupCustomDropdown('dd-outsource-type');
+
+                // Setup Searchable Dropdowns
+                const setupSearchableDropdown = (containerId, dataList, roleFilter, isAgent, onSelect) => {
+                    const container = card.querySelector(`#${containerId}`);
+                    if (!container) return;
+                    const hidden = container.querySelector('input[type="hidden"]');
+                    const input = container.querySelector('input[type="text"]');
+                    const menu = container.querySelector('.sdd-menu');
+
+                    const filtered = roleFilter === 'all'
+                        ? dataList
+                        : dataList.filter(emp => emp.employeeType === roleFilter);
+
+                    const populate = (searchTerm = '') => {
+                        menu.innerHTML = '';
+                        
+                        // "None" option
+                        const noneDiv = document.createElement('div');
+                        noneDiv.className = 'prop-map-sdd-item';
+                        noneDiv.textContent = 'None';
+                        noneDiv.style.padding = '8px 10px';
+                        noneDiv.style.cursor = 'pointer';
+                        noneDiv.style.borderRadius = '6px';
+                        noneDiv.style.fontSize = '13px';
+                        noneDiv.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            hidden.value = '';
+                            input.value = '';
+                            menu.style.display = 'none';
+                            if (onSelect) onSelect('', '');
+                        });
+                        menu.appendChild(noneDiv);
+
+                        // "Other" option
+                        const otherDiv = document.createElement('div');
+                        otherDiv.className = 'prop-map-sdd-item';
+                        otherDiv.textContent = 'Other';
+                        otherDiv.style.padding = '8px 10px';
+                        otherDiv.style.cursor = 'pointer';
+                        otherDiv.style.borderRadius = '6px';
+                        otherDiv.style.fontSize = '13px';
+                        otherDiv.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            hidden.value = 'Other';
+                            input.value = 'Other';
+                            menu.style.display = 'none';
+                            if (onSelect) onSelect('Other', 'Other');
+                        });
+                        menu.appendChild(otherDiv);
+
+                        filtered.forEach(item => {
+                            const id = isAgent ? item.agent_id : item.employeeId;
+                            const name = isAgent ? item.agent_name : item.employeeName;
+                            if (!searchTerm || name.toLowerCase().includes(searchTerm.toLowerCase()) || id.toLowerCase().includes(searchTerm.toLowerCase())) {
+                                const itemDiv = document.createElement('div');
+                                itemDiv.className = 'prop-map-sdd-item';
+                                itemDiv.innerHTML = `${name} <span style="font-size:11px;opacity:0.65;margin-left:4px;">(${id})</span>`;
+                                itemDiv.style.padding = '8px 10px';
+                                itemDiv.style.cursor = 'pointer';
+                                itemDiv.style.borderRadius = '6px';
+                                itemDiv.style.fontSize = '13px';
+                                itemDiv.addEventListener('click', (e) => {
+                                    e.stopPropagation();
+                                    hidden.value = id;
+                                    input.value = name;
+                                    menu.style.display = 'none';
+                                    if (onSelect) onSelect(id, name);
+                                });
+                                menu.appendChild(itemDiv);
+                            }
+                        });
+                    };
+
+                    input.addEventListener('focus', (e) => {
+                        e.stopPropagation();
+                        card.querySelectorAll('.dd-menu, .sdd-menu').forEach(m => {
+                            if (m !== menu) m.style.display = 'none';
+                        });
+                        populate(input.value);
+                        menu.style.display = 'block';
+                    });
+
+                    input.addEventListener('input', () => {
+                        populate(input.value);
+                        menu.style.display = 'block';
+                    });
+                };
+
+                // Close menus when clicking outside
+                document.addEventListener('click', function globalClose(e) {
+                    if (!overlay.isConnected) {
+                        document.removeEventListener('click', globalClose);
+                        return;
+                    }
+                    if (!e.target.closest('.custom-dropdown') && !e.target.closest('.searchable-dropdown')) {
+                        card.querySelectorAll('.dd-menu, .sdd-menu').forEach(m => m.style.display = 'none');
+                    }
+                });
+
+                const discountInput = card.querySelector('#prop-map-discount');
+                if (discountInput) discountInput.addEventListener('input', refreshCalcs);
+
+                refreshCalcs();
+
+                const closeModal = () => overlay.remove();
+                document.getElementById('prop-map-modal-close')?.addEventListener('click', closeModal);
+                document.getElementById('prop-map-cancel')?.addEventListener('click', closeModal);
+                overlay.addEventListener('click', (ev) => { if (ev.target === overlay) closeModal(); });
+
+                // Submit logic
+                document.getElementById('prop-map-submit')?.addEventListener('click', () => {
+                    const errEl = document.getElementById('prop-map-form-error');
+                    const discountType = document.getElementById('prop-map-discount-type')?.value?.trim();
+                    const employeeId = document.getElementById('prop-map-employee-id')?.value?.trim();
+                    const employeeName = document.getElementById('prop-map-employee-search')?.value?.trim();
+                    const teamLeader = document.getElementById('prop-map-team-leader')?.value?.trim();
+                    const teamLeaderName = document.getElementById('prop-map-team-leader-search')?.value?.trim();
+                    const assistantTeamLeader = document.getElementById('prop-map-assistant-team-leader')?.value?.trim();
+                    const assistantTeamLeaderName = document.getElementById('prop-map-assistant-team-leader-search')?.value?.trim();
+                    const agentCode = document.getElementById('prop-map-agent-code')?.value?.trim();
+                    const agentCodeName = document.getElementById('prop-map-agent-code-search')?.value?.trim();
+
+                    if (!discountType) {
+                        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Please select discount type (PayU or Cashback).'; }
+                        return;
+                    }
+                    if (!employeeId && employeeName !== 'Other') {
+                        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Employee selection is required.'; }
+                        return;
+                    }
+                    if (!employeeName) {
+                        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Employee name is required.'; }
+                        return;
+                    }
+                    if (errEl) errEl.style.display = 'none';
+
+                    const discountUnit = document.getElementById('prop-map-discount-unit')?.value || 'percentage';
+                    const discountValueRaw = document.getElementById('prop-map-discount')?.value || '0';
+                    const calc = computeProposalPremiums(draft.pAmount, discountValueRaw, discountUnit, draft.pTenure);
+
+                    const submitBtn = document.getElementById('prop-map-submit');
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Submitting...';
+                    }
+                    if (btnMap) {
+                        btnMap.disabled = true;
+                        btnMap.innerHTML = '<span style="opacity:0.8;">Mapping...</span>';
+                        btnMap.style.background = '#0065b3';
+                    }
+
+                    const payload = {
+                        id: proposalGenId(draft.num || Date.now().toString()),
+                        proposal_number: draft.num,
+                        company_name: 'Care Health Insurance',
+                        proposer_name: draft.pName,
+                        phone_number: draft.pPhone,
+                        email_id: draft.pEmail,
+                        plan_name: draft.pPlan,
+                        tenure: draft.pTenure,
+                        sum_insured: draft.pSi,
+                        insured_members: draft.pMembers,
+                        amount_payable: draft.pAmount,
+                        proposal_summary: draft.summaryHtml,
+                        payment_link: window.location.href,
+                        net_premium: formatProposalMoney(calc.netPremium),
+                        tenure_deduction_percent: calc.tenureDeductionPercent > 0 ? String(calc.tenureDeductionPercent) + '%' : '0%',
+                        tenure_deduction_amount: formatProposalMoney(calc.tenureDeductionAmount),
+                        tenure_adjusted_premium: formatProposalMoney(calc.tenureAdjustedPremium),
+                        discount_value: discountValueRaw,
+                        discount_unit: discountUnit,
+                        discount_type: discountType,
+                        discount_amount: formatProposalMoney(calc.discountAmount),
+                        updated_premium: formatProposalMoney(calc.updatedPremium),
+                        employee_id: employeeId || '',
+                        employee_name: employeeName,
+                        team_leader: teamLeader || '',
+                        team_leader_name: teamLeaderName || '',
+                        agent_code: agentCode || '',
+                        agent_code_name: agentCodeName || '',
+                        assistant_team_leader: assistantTeamLeader || '',
+                        assistant_team_leader_name: assistantTeamLeaderName || '',
+                        source_type: document.getElementById('prop-map-source-type')?.value || '',
+                        outsource_type: document.getElementById('prop-map-outsource-type')?.value || '',
+                        payment_date: (() => {
+                            const rawDate = document.getElementById('prop-map-payment-date')?.value;
+                            if (!rawDate) return '';
+                            const parts = rawDate.split('-');
+                            return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : '';
+                        })(),
+                        payment_month: document.getElementById('prop-map-payment-month')?.value || ''
+                    };
+
+                    chrome.runtime.sendMessage({ type: 'SAVE_PROPOSAL_TO_SUPABASE', payload }, (resp) => {
+                        console.log('📡 Manual Map Data Upload to Supabase:', resp);
+                        closeModal();
+                        popup.dataset.isAlreadyMapped = 'true';
+                        if (btnMap) {
+                            btnMap.disabled = true;
+                            btnMap.style.background = '#888888';
+                            btnMap.style.cursor = 'not-allowed';
+                            btnMap.style.boxShadow = 'none';
+                            btnMap.style.pointerEvents = 'none';
+                            const spinner = btnMap.querySelector('.prop-map-spinner');
+                            if (spinner) spinner.remove();
+                            const icon = btnMap.querySelector('i');
+                            if (icon) icon.remove();
+                            const btnSpan = btnMap.querySelector('span');
+                            if (btnSpan) {
+                                btnSpan.textContent = 'Already Mapped';
+                            } else {
+                                btnMap.innerHTML = '<span>Already Mapped</span>';
+                            }
+                        }
+                    });
+                });
+
+                const initDropdowns = (employeesList, agentCodesList) => {
+                    setupSearchableDropdown('sdd-employee', employeesList, 'all', false);
+                    setupSearchableDropdown('sdd-team-leader', employeesList, 'Team Leader', false);
+                    setupSearchableDropdown('sdd-agent-code', agentCodesList, 'all', true);
+                    setupSearchableDropdown('sdd-assistant-team-leader', employeesList, 'Assistant Team Leader', false);
+
+                    ['prop-map-employee-search', 'prop-map-team-leader-search', 'prop-map-agent-code-search', 'prop-map-assistant-team-leader-search'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            el.placeholder = "Search...";
+                            el.disabled = false;
+                        }
+                    });
+                };
+
+                const enableInputsManually = (placeholderText = "Enter manually...") => {
+                    ['prop-map-employee-search', 'prop-map-team-leader-search', 'prop-map-agent-code-search', 'prop-map-assistant-team-leader-search'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            el.placeholder = placeholderText;
+                            el.disabled = false;
+                        }
+                    });
+                };
+
+                try {
+                    chrome.runtime.sendMessage({ type: 'FETCH_EMPLOYEES_FROM_SUPABASE' }, (empResp) => {
+                        let rawEmployees = empResp?.data || [];
+                        const employees = rawEmployees.filter(emp => emp && emp.employeeId && emp.employeeName);
+                        
+                        chrome.runtime.sendMessage({ type: 'FETCH_AGENT_CODES_FROM_SUPABASE' }, (agentResp) => {
+                            let rawAgentCodes = agentResp?.data || [];
+                            const agentCodes = rawAgentCodes.filter(agent => agent && agent.agent_id && agent.agent_name);
+                            initDropdowns(employees, agentCodes);
+                        });
+                    });
+                } catch (err) {
+                    console.error("⚠️ Failed to call background script asynchronously:", err);
+                    enableInputsManually("Enter manually (Connection error)");
+                }
+            } catch (modalErr) {
+                console.error("❌ [showPopup.js] Error in openProposalMapDetailsModal body:", modalErr);
+            }
+        };
+
         const extractProposalDetails = () => {
             // 1. Proposal Number
             let num = '';
@@ -5560,6 +6379,84 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const bodyTxt = document.body.innerText || '';
                 const match = bodyTxt.match(/Proposal\s*Number\s*[:\s]*(\d+)/i);
                 if (match && match[1]) num = match[1];
+            }
+
+            const syncMapButtonState = () => {
+                const isAlreadyMapped = popup.dataset.isAlreadyMapped;
+                const btnMap = document.getElementById('btn-map-proposal-data');
+                if (btnMap) {
+                    if (isAlreadyMapped === 'true') {
+                        btnMap.disabled = true;
+                        btnMap.style.background = '#888888';
+                        btnMap.style.cursor = 'not-allowed';
+                        btnMap.style.boxShadow = 'none';
+                        btnMap.style.pointerEvents = 'none';
+                        // Remove spinner if present
+                        const spinner = btnMap.querySelector('.prop-map-spinner');
+                        if (spinner) spinner.remove();
+                        // Remove icon if present
+                        const icon = btnMap.querySelector('i');
+                        if (icon) icon.remove();
+                        const btnSpan = btnMap.querySelector('span');
+                        if (btnSpan) btnSpan.textContent = 'Already Mapped';
+                    } else if (isAlreadyMapped === 'false') {
+                        btnMap.disabled = false;
+                        btnMap.style.background = '#4caf50';
+                        btnMap.style.cursor = 'pointer';
+                        btnMap.style.boxShadow = '0 4px 12px rgba(76, 175, 80, 0.3)';
+                        btnMap.style.pointerEvents = 'auto';
+                        // Remove spinner if present
+                        const spinner = btnMap.querySelector('.prop-map-spinner');
+                        if (spinner) spinner.remove();
+                        // Ensure marker icon is added
+                        let icon = btnMap.querySelector('i');
+                        if (!icon) {
+                            icon = document.createElement('i');
+                            icon.className = 'fi flex fi-rr-map-marker';
+                            icon.style.fontSize = '12px';
+                            btnMap.insertBefore(icon, btnMap.firstChild);
+                        }
+                        const btnSpan = btnMap.querySelector('span');
+                        if (btnSpan) btnSpan.textContent = 'Map Data';
+                    } else {
+                        // checking (isAlreadyMapped is undefined)
+                        btnMap.disabled = true;
+                        btnMap.style.background = '#555555';
+                        btnMap.style.cursor = 'wait';
+                        btnMap.style.boxShadow = 'none';
+                        btnMap.style.pointerEvents = 'none';
+                        // Remove icon if present
+                        const icon = btnMap.querySelector('i');
+                        if (icon) icon.remove();
+                        // Ensure spinner is added
+                        let spinner = btnMap.querySelector('.prop-map-spinner');
+                        if (!spinner) {
+                            spinner = document.createElement('div');
+                            spinner.className = 'prop-map-spinner';
+                            btnMap.insertBefore(spinner, btnMap.firstChild);
+                        }
+                        const btnSpan = btnMap.querySelector('span');
+                        if (btnSpan) btnSpan.textContent = 'Checking...';
+                    }
+                }
+            };
+
+            // Check if proposal number is already mapped
+            if (num && popup.dataset.lastCheckedNum !== num) {
+                popup.dataset.lastCheckedNum = num;
+                chrome.runtime.sendMessage({
+                    type: 'CHECK_PROPOSAL_EXISTS_IN_SUPABASE',
+                    proposalNumber: num
+                }, (resp) => {
+                    if (resp && resp.success && resp.exists) {
+                        popup.dataset.isAlreadyMapped = 'true';
+                    } else {
+                        popup.dataset.isAlreadyMapped = 'false';
+                    }
+                    syncMapButtonState();
+                });
+            } else {
+                syncMapButtonState();
             }
 
             // 2. Proposer Details
@@ -5601,17 +6498,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             if (elAmount && pAmount) elAmount.innerText = pAmount;
 
             // 5. Scrape Proposal Summary as full standalone HTML (excluding term-cond)
-            let summaryHtml = '';
-            const propSec = document.querySelector('.proposal-sec');
-            if (propSec) {
-                const cloned = propSec.cloneNode(true);
-                cloned.querySelectorAll('.term-cond').forEach(el => {
-                    const parentCard = el.closest('.proposal-card');
-                    if (parentCard) parentCard.remove();
-                    else el.remove();
-                });
-                summaryHtml = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Proposal Summary</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;padding:24px}.proposal-sec{display:flex;flex-direction:column;gap:16px}.proposal-card{background:#ffffff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;padding:18px 20px!important;margin-bottom:16px!important;color:#1e293b!important;box-shadow:0 4px 12px rgba(0,0,0,.03)!important}.header-sec{font-size:15px!important;font-weight:700!important;color:#0065b3!important;border-bottom:1px solid #f1f5f9!important;padding-bottom:10px!important;margin-bottom:14px!important;display:flex!important;align-items:center!important;gap:10px!important}.row{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))!important;gap:12px!important;margin-bottom:12px!important}.widget-col{background:#f8fafc!important;border:1px solid #e2e8f0!important;padding:10px 14px!important;border-radius:10px!important;display:flex!important;flex-direction:column!important;gap:4px!important}.widget-col h3{font-size:10px!important;color:#64748b!important;margin:0!important;text-transform:uppercase!important;letter-spacing:.5px!important}.widget-col span{font-size:13px!important;color:#0f172a!important;font-weight:600!important;word-break:break-word!important}h1,h2{grid-column:1/-1!important;font-size:13px!important;color:#0284c7!important;margin:8px 0 4px!important;font-weight:700!important}ul{grid-column:1/-1!important;list-style:none!important;padding:0!important;margin:0!important;display:flex!important;flex-wrap:wrap!important;gap:8px!important}li{background:#e0f2fe!important;padding:6px 12px!important;border-radius:20px!important;font-size:12px!important;color:#0369a1!important;border:1px solid #bae6fd!important;display:flex!important;align-items:center!important}.payment-row{background:#f0fdf4!important;border:1px solid #bbf7d0!important;font-size:16px!important;font-weight:700!important;color:#166534!important;display:flex!important;justify-content:space-between!important;align-items:center!important;border-radius:14px!important;padding:18px 20px!important}.payment-row h4{margin:0!important;font-size:16px!important;color:#0f172a!important;display:flex!important;width:100%!important;justify-content:space-between!important;align-items:center!important}.payment-row h4 span{font-size:18px!important;color:#15803d!important;font-weight:800!important}</style></head><body>${cloned.outerHTML}</body></html>`;
-            }
+            const summaryHtml = buildProposalSummaryHtml();
 
             const elSummaryStatus = document.getElementById('prop-val-summary-status');
             if (elSummaryStatus && summaryHtml) elSummaryStatus.innerText = 'Captured (HTML Ready)';
@@ -5625,38 +6512,6 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     gridBox.style.marginTop = '8px';
                 }
             }
-
-            // 📤 Auto-save/upload complete proposal record to Supabase
-            if (num && pAmount && summaryHtml && popup.dataset.uploadedNum !== num) {
-                popup.dataset.uploadedNum = num;
-                const genId = (seed) => {
-                    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-                    let hash = 0;
-                    for (let i = 0; i < seed.length; i++) { hash = (hash * 31 + seed.charCodeAt(i)) >>> 0; }
-                    let result = '';
-                    for (let i = 0; i < 12; i++) { hash = (hash * 1664525 + 1013904223) >>> 0; result += chars[hash % 62]; }
-                    return result;
-                };
-                chrome.runtime.sendMessage({
-                    type: 'SAVE_PROPOSAL_TO_SUPABASE',
-                    payload: {
-                        id: genId(num),
-                        proposal_number: num,
-                        company_name: 'Care Health Insurance',
-                        proposer_name: pName,
-                        phone_number: pPhone,
-                        email_id: pEmail,
-                        plan_name: pPlan,
-                        tenure: pTenure,
-                        sum_insured: pSi,
-                        insured_members: pMembers,
-                        amount_payable: pAmount,
-                        proposal_summary: summaryHtml
-                    }
-                }, (resp) => {
-                    console.log('📡 Proposal auto-saved to Supabase:', resp);
-                });
-            }
         };
 
         const btnModal = document.getElementById('btn-open-proposal-modal');
@@ -5664,6 +6519,52 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             btnModal.onclick = (e) => {
                 e.stopPropagation();
                 openRedesignedProposalModal();
+            };
+        }
+
+        const btnMapProposal = document.getElementById('btn-map-proposal-data');
+        if (btnMapProposal) {
+            btnMapProposal.onclick = (e) => {
+                if (btnMapProposal.disabled) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                console.log('🖱️ [showPopup.js] Map Data button clicked!');
+                e.stopPropagation();
+                const draft = collectProposalMapDraft();
+                console.log('📋 [showPopup.js] Draft collected:', draft);
+                openProposalMapDetailsModal(draft, btnMapProposal);
+            };
+        }
+
+        const btnMapWrapper = document.getElementById('btn-map-wrapper');
+        if (btnMapWrapper) {
+            btnMapWrapper.onclick = (e) => {
+                const btn = document.getElementById('btn-map-proposal-data');
+                if (btn && btn.disabled) {
+                    e.stopPropagation();
+                    let tooltip = document.getElementById('prop-map-already-mapped-tooltip');
+                    if (!tooltip) {
+                        tooltip = document.createElement('div');
+                        tooltip.id = 'prop-map-already-mapped-tooltip';
+                        Object.assign(tooltip.style, {
+                            position: 'absolute', bottom: 'calc(100% + 8px)', right: '0',
+                            background: '#d32f2f', color: '#fff', padding: '8px 12px',
+                            borderRadius: '6px', fontSize: '11px', whiteSpace: 'nowrap',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: '100000',
+                            fontWeight: '600', pointerEvents: 'none', transition: 'opacity 0.2s',
+                            opacity: '0'
+                        });
+                        tooltip.textContent = 'Payment already mapped for any change contact administrator';
+                        btnMapWrapper.appendChild(tooltip);
+                    }
+                    tooltip.style.opacity = '1';
+                    setTimeout(() => {
+                        tooltip.style.opacity = '0';
+                        setTimeout(() => tooltip.remove(), 200);
+                    }, 3000);
+                }
             };
         }
 
