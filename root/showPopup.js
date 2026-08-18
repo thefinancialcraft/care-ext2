@@ -2706,22 +2706,56 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
         const table = document.querySelector('.proposalDetails-tbl');
         const rows = table ? table.querySelectorAll('tbody tr') : [];
-        const hasData = rows.length > 0 && !rows[0].textContent.toLowerCase().includes('no record');
+        const tableText = table ? table.textContent.toLowerCase() : '';
+        const bodyText = document.body ? document.body.textContent.toLowerCase() : '';
+
+        const isExplicitNoData = tableText.includes('no data found') || 
+                                 tableText.includes('no record found') || 
+                                 tableText.includes('no records found') || 
+                                 tableText.includes('no data available') ||
+                                 tableText.includes('no record') ||
+                                 tableText.includes('no data') ||
+                                 (bodyText.includes('no data found') && !table) ||
+                                 (bodyText.includes('no record found') && !table);
+
+        const hasData = rows.length > 0 && 
+                        !rows[0].textContent.toLowerCase().includes('no record') && 
+                        !rows[0].textContent.toLowerCase().includes('no data') &&
+                        !isExplicitNoData;
+
         if (!table || !hasData) {
-          if (retryCount < maxRetries) {
+          if (retryCount < maxRetries && !isExplicitNoData) {
             console.log(`Waiting for table data... (Retry ${retryCount+1}/${maxRetries})`);
             retryCount++;
             setTimeout(startExtractionWithWait, 500);
             return;
           }
-          console.log('Renewal table data not found after retries.');
-          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
+          console.log('Renewal table data not found / "No Data Found" text present.');
+          if (!isGamePlaying) removeExtractionOverlay();
+          const liveModal = document.getElementById('liveExtractModal');
+          if (liveModal) liveModal.remove();
+
+          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], (res) => {
               if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
-                  console.log('🤖 Autopilot: Table loading failed. Retrying extraction in 10 seconds...');
-                  setTimeout(() => {
-                      retryCount = 0;
-                      startExtractionWithWait();
-                  }, 10000);
+                  console.log('🤖 Autopilot: No data / table found on proposal page ("No Data Found"). Logging out & logging in to next account...');
+                  const agents = res.autopilot_agents || [];
+                  const nextIndex = (res.autopilot_index + 1) % (agents.length || 1);
+                  const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                  chrome.storage.local.set({
+                      autopilot_index: nextIndex,
+                      autopilot_account_attempts: 0,
+                      autopilot_last_active_time: Date.now(),
+                      autopilot_next_login_time: Date.now() + delayMs
+                  }, () => {
+                      const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                      if (logoutBtn) {
+                          logoutBtn.click();
+                          console.log(`🤖 Autopilot: Logged out due to 'No Data Found'. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
+                      } else {
+                          window.location.hash = '#/auth/login';
+                          window.location.reload();
+                      }
+                  });
               }
           });
           return;
@@ -5796,7 +5830,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
                             </div>
                             <div class="dd-menu" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); background:#142846; border:1px solid rgba(255,255,255,0.15); border-radius:8px; z-index:1000; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.5);">
-                                <div class="prop-map-dd-item dd-item" data-value="" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">None</div>
+                                <div class="prop-map-dd-item dd-item" data-value="none" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">None</div>
                                 <div class="prop-map-dd-item dd-item" data-value="payu" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">PayU</div>
                                 <div class="prop-map-dd-item dd-item" data-value="cashback" style="padding:8px 10px; cursor:pointer; border-radius:6px; font-size:13px;">Cashback</div>
                             </div>
@@ -6224,7 +6258,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     const agentCodeName = document.getElementById('prop-map-agent-code-search')?.value?.trim();
 
                     if (!discountType) {
-                        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Please select discount type (PayU or Cashback).'; }
+                        if (errEl) { errEl.style.display = 'block'; errEl.textContent = 'Please select discount type (None, PayU, or Cashback).'; }
                         return;
                     }
                     if (!employeeId && employeeName !== 'Other') {
