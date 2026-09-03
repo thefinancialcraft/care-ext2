@@ -1,3 +1,88 @@
+// 📝 [PERSISTENT DAILY LOG SYSTEM]
+function getFormattedTimestamp() {
+  const now = new Date();
+  const YYYY = now.getFullYear();
+  const MM = String(now.getMonth() + 1).padStart(2, '0');
+  const DD = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  
+  return {
+    dateStr: `${YYYY}-${MM}-${DD}`,
+    fullTimestamp: `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}.${ms}`
+  };
+}
+
+function writePersistentLog(level, tag, message) {
+  try {
+    const timeInfo = getFormattedTimestamp();
+    const dateKey = 'logs_' + timeInfo.dateStr;
+    const msgStr = (typeof message === 'object' && message !== null) ? JSON.stringify(message) : String(message);
+    const formattedLog = `[${timeInfo.fullTimestamp}] [${level.toUpperCase()}] [${tag}] ${msgStr}`;
+
+    chrome.storage.local.get([dateKey, 'log_date_list'], (res) => {
+      let logs = res[dateKey] || [];
+      logs.push(formattedLog);
+      
+      if (logs.length > 3000) {
+        logs = logs.slice(logs.length - 3000);
+      }
+
+      let dateList = res.log_date_list || [];
+      if (!dateList.includes(timeInfo.dateStr)) {
+        dateList.push(timeInfo.dateStr);
+        dateList.sort();
+        while (dateList.length > 10) {
+          const oldDate = dateList.shift();
+          chrome.storage.local.remove(['logs_' + oldDate]);
+        }
+      }
+
+      chrome.storage.local.set({
+        [dateKey]: logs,
+        log_date_list: dateList
+      });
+    });
+  } catch (e) {}
+}
+
+function setupConsoleIntercept(moduleTag) {
+  if (self._consoleLoggerInitialized) return;
+  self._consoleLoggerInitialized = true;
+
+  const origLog = console.log;
+  const origWarn = console.warn;
+  const origError = console.error;
+
+  function formatArgs(args) {
+    return Array.from(args).map(arg => {
+      if (typeof arg === 'object' && arg !== null) {
+        try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+      }
+      return String(arg);
+    }).join(' ');
+  }
+
+  console.log = function(...args) {
+    origLog.apply(console, args);
+    writePersistentLog('INFO', moduleTag, formatArgs(args));
+  };
+
+  console.warn = function(...args) {
+    origWarn.apply(console, args);
+    writePersistentLog('WARN', moduleTag, formatArgs(args));
+  };
+
+  console.error = function(...args) {
+    origError.apply(console, args);
+    writePersistentLog('ERROR', moduleTag, formatArgs(args));
+  };
+}
+
+setupConsoleIntercept('Background');
+
 function handlePopupInjection(tabId, url) {
   if (!url) return;
 
@@ -481,8 +566,69 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'PING') {
     sendResponse({ type: 'PONG' });
   }
+  else if (message.type === 'WRITE_LOG_ENTRY') {
+    writePersistentLog(message.level || 'INFO', message.tag || 'Content', message.text || '');
+    sendResponse({ success: true });
+    return true;
+  }
+  else if (message.type === 'GET_DAILY_LOG_DATES') {
+    chrome.storage.local.get(['log_date_list'], (res) => {
+      sendResponse({ success: true, dates: res.log_date_list || [] });
+    });
+    return true;
+  }
+  else if (message.type === 'GET_DAILY_LOGS') {
+    const targetDate = message.date || getFormattedTimestamp().dateStr;
+    const dateKey = 'logs_' + targetDate;
+    chrome.storage.local.get([dateKey], (res) => {
+      sendResponse({ success: true, date: targetDate, logs: res[dateKey] || [] });
+    });
+    return true;
+  }
   else if (message.type === 'LOG_FETCH') {
     logSyncToSupabase(message.payload.status || 'FETCHING', message.payload.total || 0, message.payload.uploaded || 0, message.payload.error || null);
+  }
+  else if (message.type === 'LOG_SUPABASE_ERROR') {
+    const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    
+    const generate6CharId = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let result = '';
+      for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
+
+    const payload = {
+      id: generate6CharId(),
+      agent_id: message.payload.agent_id || null,
+      agent_name: message.payload.agent_name || null,
+      status: 'DOM_ERROR',
+      error_message: message.payload.error_message || '',
+      timestamp: new Date().toISOString()
+    };
+
+    fetch(SUPABASE_LOGS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      },
+      body: JSON.stringify(payload)
+    })
+      .then(res => {
+        if (res.ok) console.log('📝 DOM Error logged to Supabase faveo_logs:', payload);
+        else console.warn('⚠️ Supabase DOM Error log insert status:', res.status);
+        sendResponse({ success: res.ok });
+      })
+      .catch(err => {
+        console.error('❌ Supabase DOM Error log failed:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
   }
   else if (message.type === 'FETCH_AGENTS') {
     chrome.storage.local.get(['favExtId'], function (res) {

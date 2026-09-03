@@ -2,6 +2,161 @@
     if (window.favLoginMonitorStarted) return;
     window.favLoginMonitorStarted = true;
 
+    function getFormattedTimestamp() {
+        var now = new Date();
+        var YYYY = now.getFullYear();
+        var MM = String(now.getMonth() + 1).padStart(2, '0');
+        var DD = String(now.getDate()).padStart(2, '0');
+        var hh = String(now.getHours()).padStart(2, '0');
+        var mm = String(now.getMinutes()).padStart(2, '0');
+        var ss = String(now.getSeconds()).padStart(2, '0');
+        var ms = String(now.getMilliseconds()).padStart(3, '0');
+        return {
+            dateStr: YYYY + '-' + MM + '-' + DD,
+            fullTimestamp: YYYY + '-' + MM + '-' + DD + ' ' + hh + ':' + mm + ':' + ss + '.' + ms
+        };
+    }
+
+    function writePersistentLog(level, tag, message) {
+        try {
+            var timeInfo = getFormattedTimestamp();
+            var dateKey = 'logs_' + timeInfo.dateStr;
+            var msgStr = (typeof message === 'object' && message !== null) ? JSON.stringify(message) : String(message);
+            var formattedLog = '[' + timeInfo.fullTimestamp + '] [' + level.toUpperCase() + '] [' + tag + '] ' + msgStr;
+
+            chrome.storage.local.get([dateKey, 'log_date_list'], function(res) {
+                var logs = res[dateKey] || [];
+                logs.push(formattedLog);
+                if (logs.length > 3000) { logs = logs.slice(logs.length - 3000); }
+                var dateList = res.log_date_list || [];
+                if (!dateList.includes(timeInfo.dateStr)) {
+                    dateList.push(timeInfo.dateStr);
+                    dateList.sort();
+                    while (dateList.length > 10) {
+                        var oldDate = dateList.shift();
+                        chrome.storage.local.remove(['logs_' + oldDate]);
+                    }
+                }
+                var updateObj = {};
+                updateObj[dateKey] = logs;
+                updateObj['log_date_list'] = dateList;
+                chrome.storage.local.set(updateObj);
+            });
+        } catch (e) {}
+    }
+
+    (function setupConsoleIntercept(moduleTag) {
+        if (window._favLoginConsoleLoggerInitialized) return;
+        window._favLoginConsoleLoggerInitialized = true;
+
+        var origLog = console.log;
+        var origWarn = console.warn;
+        var origError = console.error;
+
+        function formatArgs(args) {
+            return Array.from(args).map(function(arg) {
+                if (typeof arg === 'object' && arg !== null) {
+                    try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+                }
+                return String(arg);
+            }).join(' ');
+        }
+
+        console.log = function() {
+            origLog.apply(console, arguments);
+            writePersistentLog('INFO', moduleTag, formatArgs(arguments));
+        };
+
+        console.warn = function() {
+            origWarn.apply(console, arguments);
+            writePersistentLog('WARN', moduleTag, formatArgs(arguments));
+        };
+
+        console.error = function() {
+            origError.apply(console, arguments);
+            writePersistentLog('ERROR', moduleTag, formatArgs(arguments));
+        };
+    })('favLogin');
+
+    // 🛡️ [SUPABASE DOM ERROR OBSERVER - MASTER MODE]
+    var lastLoggedSupabaseErrorText = '';
+    var lastLoggedSupabaseErrorTime = 0;
+
+    function logDomErrorToSupabase(errorText, agent) {
+        if (!errorText || typeof errorText !== 'string') return;
+        var cleanText = errorText.trim();
+        if (!cleanText || cleanText.length < 3) return;
+
+        var now = Date.now();
+        if (cleanText === lastLoggedSupabaseErrorText && (now - lastLoggedSupabaseErrorTime) < 10000) {
+            return;
+        }
+
+        lastLoggedSupabaseErrorText = cleanText;
+        lastLoggedSupabaseErrorTime = now;
+
+        chrome.storage.local.get(['is_master_extension', 'selectedAgentId', 'selectedAgentName', 'favPendingResetId', 'favPendingResetName', 'autopilot_agents', 'autopilot_index'], function(res) {
+            var currentAgentId = (agent ? (getKey(agent, 'agent id') || getKey(agent, 'agent_id')) : null) ||
+                                 res.selectedAgentId || res.favPendingResetId || '';
+            var currentAgentName = (agent ? (getKey(agent, 'agent name') || getKey(agent, 'agent_name')) : null) ||
+                                   res.selectedAgentName || res.favPendingResetName || 'Agent';
+
+            if (!currentAgentId && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                var idx = res.autopilot_index || 0;
+                var currentAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+                if (currentAgent) {
+                    currentAgentId = getKey(currentAgent, 'agent id') || getKey(currentAgent, 'agent_id') || '';
+                    currentAgentName = getKey(currentAgent, 'agent name') || getKey(currentAgent, 'agent_name') || 'Agent';
+                }
+            }
+
+            console.warn('📡 [Supabase Observer] Syncing DOM error to Supabase for agent:', currentAgentId, 'Error:', cleanText);
+
+            chrome.runtime.sendMessage({
+                type: 'LOG_SUPABASE_ERROR',
+                payload: {
+                    agent_id: currentAgentId,
+                    agent_name: currentAgentName,
+                    error_message: cleanText
+                }
+            });
+        });
+    }
+
+    function setupDomErrorObserver() {
+        if (window._supabaseDomErrorObserverActive) return;
+        window._supabaseDomErrorObserverActive = true;
+
+        var checkErrorElements = function() {
+            var errEls = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger, .error-msg, span.error-message');
+            for (var i = 0; i < errEls.length; i++) {
+                var el = errEls[i];
+                if (el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0)) {
+                    var txt = (el.innerText || el.textContent || '').trim();
+                    if (txt && txt.length > 2) {
+                        logDomErrorToSupabase(txt, null);
+                    }
+                }
+            }
+        };
+
+        var observer = new MutationObserver(function() {
+            checkErrorElements();
+        });
+
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (document.body) observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+            });
+        }
+
+        setInterval(checkErrorElements, 2500);
+    }
+
+    setupDomErrorObserver();
+
     var getKey = function(obj, pattern) {
         if (!obj) return null;
         var lowerPattern = pattern.toLowerCase();
@@ -108,6 +263,63 @@
         });
     };
 
+    var handleInvalidOtpError = function(agent, statusMsg, loader) {
+        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Checking Resend...'; statusMsg.style.color = '#ff5252'; }
+        if (loader) loader.style.display = 'none';
+
+        chrome.storage.local.get(['invalid_otp_resend_done', 'favPendingResetAgent', 'autopilot_agents', 'autopilot_index', 'selectedAgentId'], function(res) {
+            var targetAgent = agent || res.favPendingResetAgent;
+            if (!targetAgent && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                var idx = res.autopilot_index || 0;
+                targetAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+            }
+
+            if (res.invalid_otp_resend_done) {
+                console.warn('⚠️ [favLogin] Invalid OTP error occurred AGAIN after Resend OTP. Skipping agent immediately...');
+                if (statusMsg) { statusMsg.innerText = 'INVALID OTP AGAIN - Skipping agent...'; statusMsg.style.color = '#ff5252'; }
+                
+                chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
+                    setTimeout(function() {
+                        skipToNextAgentImmediately();
+                    }, 1500);
+                });
+                return;
+            }
+
+            console.log('🔄 [favLogin] "Please Enter Valid otp Number" detected! Clicking Resend OTP and re-fetching...');
+            if (statusMsg) { statusMsg.innerText = 'Invalid OTP — Clicking Resend OTP...'; statusMsg.style.color = '#ff9800'; }
+
+            var resendBtnEl = document.querySelector('.unlock a') ||
+                              document.querySelector('#resend_otp_btn') ||
+                              document.querySelector('a.unlock') ||
+                              Array.from(document.querySelectorAll('a, button')).find(function(el) {
+                                  return (el.innerText || el.textContent || '').toLowerCase().includes('resend');
+                              });
+
+            chrome.storage.local.set({ invalid_otp_resend_done: true }, function() {
+                chrome.storage.local.remove(['last_filled_otp'], function() {
+                    if (resendBtnEl && resendBtnEl.isConnected) {
+                        console.log('👆 Resend OTP button clicked on DOM:', resendBtnEl);
+                        resendBtnEl.click();
+                    } else {
+                        console.warn('⚠️ Resend OTP button element not found on DOM, attempting OTP re-fetch...');
+                    }
+
+                    setTimeout(function() {
+                        if (statusMsg) { statusMsg.innerText = 'Fetching new OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
+                        if (loader) loader.style.display = 'flex';
+                        if (targetAgent) {
+                            fetchAndFillOtp(targetAgent, 0);
+                        } else {
+                            console.warn('⚠️ Target agent not available for OTP re-fetch. Skipping...');
+                            skipToNextAgentImmediately();
+                        }
+                    }, 3000);
+                });
+            });
+        });
+    };
+
     var fetchAndFillOtp = function(agent, retryCount) {
         if (!isPageInOtpState()) {
             console.log('🚫 [favLogin] Skipping OTP fetch - Page is not in OTP verification/reset state.');
@@ -149,35 +361,48 @@
                             });
                         } else {
                             var reason = !isOtpFresh ? 'stale' : 'same as old OTP';
-                            console.log('⏳ Fetched OTP (' + otpVal + ') is ' + reason + '. Retrying in 5s...');
-                            if (retryCount < 5) {
+                            console.log('⏳ Fetched OTP (' + otpVal + ') is ' + reason + '. Retrying in 5s... (Attempt ' + (retryCount + 1) + '/5)');
+                            if (retryCount < 4) {
                                 setTimeout(function() {
                                     fetchAndFillOtp(agent, retryCount + 1);
                                 }, 5000);
                             } else {
-                                if (statusMsg) statusMsg.innerText = 'OTP request timed out (5 attempts). Skipping agent...';
-                                handleOtpFetchFailure(agent);
+                                chrome.storage.local.get(['invalid_otp_resend_done'], function(res) {
+                                    if (!res.invalid_otp_resend_done) {
+                                        console.warn('⚠️ OTP request timed out after 5 attempts. Triggering Resend OTP...');
+                                        if (statusMsg) statusMsg.innerText = 'OTP timeout (5 attempts) — Triggering Resend OTP...';
+                                        handleInvalidOtpError(agent, statusMsg, null);
+                                    } else {
+                                        console.warn('⚠️ OTP request timed out after Resend OTP. Skipping agent immediately...');
+                                        if (statusMsg) statusMsg.innerText = 'OTP timeout after Resend — Skipping agent...';
+                                        chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
+                                            skipToNextAgentImmediately();
+                                        });
+                                    }
+                                });
                             }
                         }
                     });
                 })
                 .catch(function(err) {
                     console.error('❌ OTP Fetch error:', err);
-                    if (retryCount < 5) {
+                    if (retryCount < 4) {
                         setTimeout(function() {
                             fetchAndFillOtp(agent, retryCount + 1);
                         }, 5000);
                     } else {
                         if (statusMsg) statusMsg.innerText = 'OTP Fetch error. Skipping agent...';
-                        handleOtpFetchFailure(agent);
+                        chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
+                            skipToNextAgentImmediately();
+                        });
                     }
                 });
         } else {
             console.error('❌ No agent_otp_finder URL found for agent:', agent);
             if (statusMsg) statusMsg.innerText = 'No OTP Finder URL configured for this agent. Skipping...';
             setTimeout(function() {
-                handleOtpFetchFailure(agent);
-            }, 5000);
+                skipToNextAgentImmediately();
+            }, 3000);
         }
     };
 
@@ -1439,6 +1664,25 @@
                         if (statusMsg) { statusMsg.innerText = 'FILL CORRECT DETAILS'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
+                    } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it')) {
+                        if (statusMsg) { statusMsg.innerText = 'PASSWORD EXPIRED - Resetting...'; statusMsg.style.color = '#ff9800'; }
+                        if (loader) loader.style.display = 'flex';
+                        foundError = true;
+
+                        var agentName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Agent';
+                        var agentId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || aId || '';
+
+                        console.warn('⚠️ [favLogin] "Your password has expired. Kindly reset it." detected for agent:', agentId, '! Triggering Create/Reset Password workflow...');
+
+                        chrome.storage.local.set({ 
+                            favPendingResetId: agentId, 
+                            favPendingResetAgent: agent, 
+                            favPendingResetName: agentName 
+                        }, function() {
+                            setTimeout(function() {
+                                window.location.hash = '#/auth/resetpwd';
+                            }, 800);
+                        });
                     } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count') || txt.includes('UserId is blocked') || txt.includes('maximum login attempt limit')) {
                         if (statusMsg) { statusMsg.innerText = 'MAX OTP LIMIT REACHED'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
@@ -1449,91 +1693,9 @@
                             window.location.hash = '#/auth/login';
                         }, 3000);
                     } else if (txt.toLowerCase().includes('please enter valid otp') || txt.toLowerCase().includes('valid otp') || txt.toLowerCase().includes('invalid otp') || txt.toLowerCase().includes('conflict with recovery') || txt.toLowerCase().includes('replica disconnect')) {
-                        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Re-fetching latest OTP first...'; statusMsg.style.color = '#ff5252'; }
-                        if (loader) loader.style.display = 'none';
-                        foundError = true;
-
-                        console.log('⚠️ Invalid OTP error on page! Will retry fetch 5 times before resending...');
-                        
-                        chrome.storage.local.get(['favPendingResetAgent'], function(r) {
-                            var agentForRetry = r.favPendingResetAgent;
-                            if (!agentForRetry) return;
-
-                            var retryFetchBeforeResend = function(attemptsLeft) {
-                                if (!isPageInOtpState()) {
-                                    console.log('🚫 [favLogin] Page not in OTP state anymore during observer retry fetch. Cancelling.');
-                                    return;
-                                }
-                                if (attemptsLeft <= 0) {
-                                    console.log('🔄 [favLogin] All re-fetch attempts done. Checking Resend OTP...');
-                                    chrome.storage.local.get(['otp_resend_count'], function(rCountRes) {
-                                        var resendCount = rCountRes.otp_resend_count || 0;
-                                        if (resendCount >= 3) {
-                                            console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
-                                            skipToNextAgentImmediately();
-                                            return;
-                                        }
-                                        
-                                        if (statusMsg) { statusMsg.innerText = 'No valid OTP found. Resending OTP (' + (resendCount + 1) + '/3)...'; statusMsg.style.color = '#ff9800'; }
-                                        var resendBtnEl = document.querySelector('.unlock a') ||
-                                                          document.querySelector('#resend_otp_btn') ||
-                                                          Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                                              return (el.innerText || '').toLowerCase().includes('resend');
-                                                          });
-                                        if (resendBtnEl) {
-                                            console.log('🔄 [favLogin] Resend OTP clicked.');
-                                            chrome.storage.local.set({ otp_resend_count: resendCount + 1 }, function() {
-                                                resendBtnEl.click();
-                                            });
-                                        }
-                                        setTimeout(function() {
-                                            if (statusMsg) { statusMsg.innerText = 'Fetching OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
-                                            fetchAndFillOtp(agentForRetry, 0);
-                                        }, 5000);
-                                    });
-                                    return;
-                                }
-                                if (statusMsg) statusMsg.innerText = 'Re-fetching OTP (attempt ' + (6 - attemptsLeft) + '/5)...';
-                                var apiUrl = getOtpApiUrl(agentForRetry);
-                                if (!apiUrl) { retryFetchBeforeResend(0); return; }
-                                fetch(apiUrl)
-                                    .then(function(res) { return res.json(); })
-                                    .then(function(data) {
-                                        var otpVal = null;
-                                        if (typeof data === 'object' && data !== null) {
-                                            otpVal = data.otp || data.code || data.data || data.otp_code || data.otpNumber || data.otp_number;
-                                        }
-                                        if (!otpVal) otpVal = data;
-                                        if (typeof otpVal === 'number') otpVal = String(otpVal);
-                                        if (typeof otpVal === 'string') otpVal = otpVal.trim();
-
-                                        var otpDate = data.date ? new Date(data.date).getTime() : 0;
-                                        var now = Date.now();
-                                        var diffMinutes = otpDate > 0 ? ((now - otpDate) / (1000 * 60)) : 999;
-
-                                        chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
-                                            var lastFilledOtp = storageRes.last_filled_otp;
-                                            var isOtpFresh = (otpDate !== 0 && diffMinutes <= 3);
-                                            var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
-
-                                            if (isOtpFresh && isOtpNew) {
-                                                console.log('✅ [favLogin] Fresh OTP found on retry! Submitting...');
-                                                chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
-                                                    displayOtpAndSubmit(data, agentForRetry);
-                                                });
-                                            } else {
-                                                console.log('⏳ OTP not fresh or not new yet. Retrying in 5s... (' + attemptsLeft + ' attempts left)');
-                                                setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 5000);
-                                            }
-                                        });
-                                    })
-                                    .catch(function() {
-                                        setTimeout(function() { retryFetchBeforeResend(attemptsLeft - 1); }, 5000);
-                                    });
-                            };
-
-                            retryFetchBeforeResend(5);
-                        });
+                        observer.disconnect();
+                        handleInvalidOtpError(agent, statusMsg, loader);
+                        return;
                     } else if (txt.includes('Something went wrong') || txt.includes('please try again')) {
                         if (statusMsg) { statusMsg.innerText = 'ERROR - Reloading...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
@@ -1712,99 +1874,70 @@
             var errEl = document.querySelector('.error-message.text-center, .error-message, div.alert-danger');
             if (errEl) {
                 var errText = (errEl.innerText || errEl.textContent || '').toLowerCase();
-                if (errText.includes('please enter valid otp') || errText.includes('invalid otp') || errText.includes('valid otp') || errText.includes('conflict with recovery') || errText.includes('replica disconnect')) {
+                if (errText.includes('password has expired') || errText.includes('kindly reset it')) {
+                    var isAlreadyHandlingExpired = popup && popup.dataset && popup.dataset.handlingExpiredPwd === 'true';
+                    if (!isAlreadyHandlingExpired) {
+                        if (popup) popup.dataset.handlingExpiredPwd = 'true';
+                        console.warn('🚨 [favLogin] "Your password has expired. Kindly reset it." error detected on page! Triggering Reset Password...');
+
+                        chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], function(res) {
+                            var agentId = res.selectedAgentId;
+                            var agentName = res.selectedAgentName || 'Agent';
+                            var targetAgent = null;
+
+                            if (res.autopilot_agents && res.autopilot_agents.length > 0) {
+                                if (agentId) {
+                                    targetAgent = res.autopilot_agents.find(function(a) { 
+                                        return (getKey(a, 'agent id') || getKey(a, 'agent_id')) == agentId; 
+                                    });
+                                }
+                                if (!targetAgent) {
+                                    var idx = res.autopilot_index || 0;
+                                    targetAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+                                }
+                            }
+
+                            var finalId = agentId || (targetAgent ? (getKey(targetAgent, 'agent id') || getKey(targetAgent, 'agent_id')) : '');
+                            var finalName = agentName || (targetAgent ? (getKey(targetAgent, 'agent name') || getKey(targetAgent, 'agent_name')) : 'Agent');
+
+                            chrome.storage.local.set({ 
+                                favPendingResetId: finalId, 
+                                favPendingResetAgent: targetAgent, 
+                                favPendingResetName: finalName 
+                            }, function() {
+                                setTimeout(function() {
+                                    window.location.hash = '#/auth/resetpwd';
+                                }, 500);
+                            });
+                        });
+                    }
+                }
+            }
+
+            // 🚨 Global check for "Please Enter Valid otp Number.!!" error message anywhere on DOM
+            var allErrEls = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger');
+            for (var eIdx = 0; eIdx < allErrEls.length; eIdx++) {
+                var errTextStr = (allErrEls[eIdx].innerText || allErrEls[eIdx].textContent || '').toLowerCase();
+                if (errTextStr.includes('please enter valid otp') || errTextStr.includes('invalid otp') || errTextStr.includes('valid otp') || errTextStr.includes('conflict with recovery') || errTextStr.includes('replica disconnect')) {
                     var isAlreadyHandlingInvalidOtp = popup && popup.dataset && popup.dataset.handlingInvalidOtp === 'true';
                     if (!isAlreadyHandlingInvalidOtp) {
                         if (popup) popup.dataset.handlingInvalidOtp = 'true';
-                        console.log('🚨 [favLogin] "Invalid OTP" error detected! Retrying fetch 5x before resending...');
-
+                        console.warn('⚠️ [urlMonitor] "Please Enter Valid otp Number" error detected on page! Invoking handleInvalidOtpError...');
                         var statusMsg2 = document.getElementById('favLoginStatus');
-                        if (statusMsg2) { statusMsg2.innerText = 'Invalid OTP — Re-fetching latest OTP first...'; statusMsg2.style.color = '#ff5252'; }
-
-                        chrome.storage.local.get(['favPendingResetAgent'], function(res2) {
+                        var loader2 = document.getElementById('favDancingDots');
+                        chrome.storage.local.get(['favPendingResetAgent', 'autopilot_agents', 'autopilot_index'], function(res2) {
                             var agentForRetry2 = res2.favPendingResetAgent;
-                            if (!agentForRetry2) { if (popup) popup.dataset.handlingInvalidOtp = 'false'; return; }
-
-                            var retryFetchBeforeResend2 = function(attemptsLeft2) {
-                                if (!isPageInOtpState()) {
-                                    console.log('🚫 [favLogin] Page not in OTP state anymore during watcher retry fetch. Cancelling.');
-                                    if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                    return;
-                                }
-                                if (attemptsLeft2 <= 0) {
-                                    console.log('🔄 [favLogin] All re-fetch attempts done. Checking Resend OTP...');
-                                    chrome.storage.local.get(['otp_resend_count'], function(rCountRes) {
-                                        var resendCount = rCountRes.otp_resend_count || 0;
-                                        if (resendCount >= 3) {
-                                            console.warn('⚠️ Maximum Resend OTP attempts (3) reached. Failing login cycle...');
-                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                            skipToNextAgentImmediately();
-                                            return;
-                                        }
-                                        
-                                        if (statusMsg2) { statusMsg2.innerText = 'No new OTP. Resending OTP (' + (resendCount + 1) + '/3)...'; statusMsg2.style.color = '#ff9800'; }
-                                        var resendBtnEl2 = document.querySelector('.unlock a') ||
-                                                           document.querySelector('#resend_otp_btn') ||
-                                                           Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                                               return (el.innerText || '').toLowerCase().includes('resend');
-                                                           });
-                                        if (resendBtnEl2) {
-                                            console.log('🔄 [favLogin] Resend OTP clicked.');
-                                            chrome.storage.local.set({ otp_resend_count: resendCount + 1 }, function() {
-                                                resendBtnEl2.click();
-                                            });
-                                        }
-                                        setTimeout(function() {
-                                            if (statusMsg2) { statusMsg2.innerText = 'Fetching OTP after resend...'; statusMsg2.style.color = '#4fc3f7'; }
-                                            if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                            fetchAndFillOtp(agentForRetry2, 0);
-                                        }, 5000);
-                                    });
-                                    return;
-                                }
-                                if (statusMsg2) statusMsg2.innerText = 'Re-fetching latest OTP (attempt ' + (6 - attemptsLeft2) + '/5)...';
-                                var apiUrl2 = getOtpApiUrl(agentForRetry2);
-                                if (!apiUrl2) { retryFetchBeforeResend2(0); return; }
-                                fetch(apiUrl2)
-                                    .then(function(r2) { return r2.json(); })
-                                    .then(function(d2) {
-                                        var otpVal = null;
-                                        if (typeof d2 === 'object' && d2 !== null) {
-                                            otpVal = d2.otp || d2.code || d2.data || d2.otp_code || d2.otpNumber || d2.otp_number;
-                                        }
-                                        if (!otpVal) otpVal = d2;
-                                        if (typeof otpVal === 'number') otpVal = String(otpVal);
-                                        if (typeof otpVal === 'string') otpVal = otpVal.trim();
-
-                                        var otpDate2 = d2.date ? new Date(d2.date).getTime() : 0;
-                                        var now2 = Date.now();
-                                        var diff2 = otpDate2 > 0 ? ((now2 - otpDate2) / (1000 * 60)) : 999;
-
-                                        chrome.storage.local.get(['last_filled_otp'], function(storageRes) {
-                                            var lastFilledOtp = storageRes.last_filled_otp;
-                                            var isOtpFresh = (otpDate2 !== 0 && diff2 <= 3);
-                                            var isOtpNew = (otpVal && otpVal !== lastFilledOtp);
-
-                                            if (isOtpFresh && isOtpNew) {
-                                                console.log('✅ [favLogin] Fresh OTP found on watcher retry!');
-                                                if (popup) popup.dataset.handlingInvalidOtp = 'false';
-                                                chrome.storage.local.set({ last_filled_otp: otpVal }, function() {
-                                                    displayOtpAndSubmit(d2, agentForRetry2);
-                                                });
-                                            } else {
-                                                console.log('⏳ OTP not fresh or not new yet. Retrying in 5s... (' + attemptsLeft2 + ' left)');
-                                                setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 5000);
-                                            }
-                                        });
-                                    })
-                                    .catch(function() {
-                                        setTimeout(function() { retryFetchBeforeResend2(attemptsLeft2 - 1); }, 5000);
-                                    });
-                            };
-
-                            retryFetchBeforeResend2(5);
+                            if (!agentForRetry2 && res2.autopilot_agents && res2.autopilot_agents.length > 0) {
+                                var idx2 = res2.autopilot_index || 0;
+                                agentForRetry2 = res2.autopilot_agents[idx2 % res2.autopilot_agents.length];
+                            }
+                            handleInvalidOtpError(agentForRetry2, statusMsg2, loader2);
+                            setTimeout(function() {
+                                if (popup) popup.dataset.handlingInvalidOtp = 'false';
+                            }, 8000);
                         });
                     }
+                    break;
                 }
             }
 

@@ -11,7 +11,162 @@
        console.warn('showPopup.js already running. Stopping redundant instance.');
        return;
     }
+
+    
     window.careExtInitialized = true;
+
+    function getFormattedTimestamp() {
+        const now = new Date();
+        const YYYY = now.getFullYear();
+        const MM = String(now.getMonth() + 1).padStart(2, '0');
+        const DD = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        const ms = String(now.getMilliseconds()).padStart(3, '0');
+        return {
+            dateStr: `${YYYY}-${MM}-${DD}`,
+            fullTimestamp: `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}.${ms}`
+        };
+    }
+
+    function writePersistentLog(level, tag, message) {
+        try {
+            const timeInfo = getFormattedTimestamp();
+            const dateKey = 'logs_' + timeInfo.dateStr;
+            const msgStr = (typeof message === 'object' && message !== null) ? JSON.stringify(message) : String(message);
+            const formattedLog = `[${timeInfo.fullTimestamp}] [${level.toUpperCase()}] [${tag}] ${msgStr}`;
+
+            chrome.storage.local.get([dateKey, 'log_date_list'], (res) => {
+                let logs = res[dateKey] || [];
+                logs.push(formattedLog);
+                if (logs.length > 3000) { logs = logs.slice(logs.length - 3000); }
+                let dateList = res.log_date_list || [];
+                if (!dateList.includes(timeInfo.dateStr)) {
+                    dateList.push(timeInfo.dateStr);
+                    dateList.sort();
+                    while (dateList.length > 10) {
+                        const oldDate = dateList.shift();
+                        chrome.storage.local.remove(['logs_' + oldDate]);
+                    }
+                }
+                chrome.storage.local.set({
+                    [dateKey]: logs,
+                    log_date_list: dateList
+                });
+            });
+        } catch (e) {}
+    }
+
+    (function setupConsoleIntercept(moduleTag) {
+        if (window._showPopupConsoleLoggerInitialized) return;
+        window._showPopupConsoleLoggerInitialized = true;
+
+        const origLog = console.log;
+        const origWarn = console.warn;
+        const origError = console.error;
+
+        function formatArgs(args) {
+            return Array.from(args).map(arg => {
+                if (typeof arg === 'object' && arg !== null) {
+                    try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+                }
+                return String(arg);
+            }).join(' ');
+        }
+
+        console.log = function(...args) {
+            origLog.apply(console, args);
+            writePersistentLog('INFO', moduleTag, formatArgs(args));
+        };
+
+        console.warn = function(...args) {
+            origWarn.apply(console, args);
+            writePersistentLog('WARN', moduleTag, formatArgs(args));
+        };
+
+        console.error = function(...args) {
+            origError.apply(console, args);
+            writePersistentLog('ERROR', moduleTag, formatArgs(args));
+        };
+    })('Autopilot');
+
+    // 🛡️ [SUPABASE DOM ERROR OBSERVER - MASTER MODE]
+    let lastLoggedSupabaseErrorText = '';
+    let lastLoggedSupabaseErrorTime = 0;
+
+    function logDomErrorToSupabase(errorText) {
+        if (!errorText || typeof errorText !== 'string') return;
+        const cleanText = errorText.trim();
+        if (!cleanText || cleanText.length < 3) return;
+
+        const now = Date.now();
+        if (cleanText === lastLoggedSupabaseErrorText && (now - lastLoggedSupabaseErrorTime) < 10000) {
+            return;
+        }
+
+        lastLoggedSupabaseErrorText = cleanText;
+        lastLoggedSupabaseErrorTime = now;
+
+        chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], (res) => {
+            let currentAgentId = res.selectedAgentId || '';
+            let currentAgentName = res.selectedAgentName || 'Agent';
+
+            if (!currentAgentId && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                const idx = res.autopilot_index || 0;
+                const currentAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+                if (currentAgent) {
+                    currentAgentId = currentAgent['agent id'] || currentAgent['agent_id'] || currentAgent['agentId'] || '';
+                    currentAgentName = currentAgent['agent name'] || currentAgent['agent_name'] || currentAgent['agentName'] || 'Agent';
+                }
+            }
+
+            console.warn('📡 [Supabase Observer] Syncing DOM error to Supabase for agent:', currentAgentId, 'Error:', cleanText);
+
+            chrome.runtime.sendMessage({
+                type: 'LOG_SUPABASE_ERROR',
+                payload: {
+                    agent_id: currentAgentId,
+                    agent_name: currentAgentName,
+                    error_message: cleanText
+                }
+            });
+        });
+    }
+
+    function setupDomErrorObserver() {
+        if (window._supabaseDomErrorObserverActive) return;
+        window._supabaseDomErrorObserverActive = true;
+
+        const checkErrorElements = () => {
+            const errEls = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger, .error-msg, span.error-message');
+            errEls.forEach((el) => {
+                if (el && (el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0)) {
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    if (txt && txt.length > 2) {
+                        logDomErrorToSupabase(txt);
+                    }
+                }
+            });
+        };
+
+        const observer = new MutationObserver(() => {
+            checkErrorElements();
+        });
+
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                if (document.body) observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+            });
+        }
+
+        setInterval(checkErrorElements, 2500);
+    }
+
+    setupDomErrorObserver();
+
     let extensionGlobalActive = true;
     let isAutoSyncRunning = false;
     let isUploadPaused = false; // 🚀 New flag for error/pause states   // 🚀 Auto-pilot state
@@ -2146,11 +2301,25 @@ const createCustomMonthActionUI = (monthsBack) => {
     return container;
   };
 
+  // 🎯 Helper: Check if exact Dashboard URL
+  const isExactDashboardPage = (url = window.location.href) => {
+      try {
+          const cleanUrl = url.split('?')[0];
+          const parts = cleanUrl.split('#');
+          const baseUrl = (parts[0] || '').replace(/\/+$/, '').toLowerCase();
+          const hashPath = (parts[1] || '').replace(/\/+$/, '').toLowerCase();
+          
+          return baseUrl === 'https://faveo.careinsurance.com/newfaveo' && 
+                 (hashPath === '/portal/dashboard' || hashPath === 'portal/dashboard');
+      } catch (e) {
+          return false;
+      }
+  };
+
   // 🌫️ Initial Overlay for Name Fetching
   const showInitialOverlay = () => {
-      const currentUrl = window.location.href;
-      if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary') || currentUrl.includes('#auth/login') || currentUrl.includes('#/auth/resetpwd') || currentUrl.includes('#/auth/verifyotp') || currentUrl.includes('#/auth/changepwd')) {
-          console.log('🛑 [showPopup] Login/Portability URL detected! Skipping initial overlay.');
+      if (!isExactDashboardPage()) {
+          console.log('🛑 [showPopup] Not exact dashboard URL. Skipping initial overlay.');
           return;
       }
       const existing = document.getElementById('initial-fetch-overlay');
@@ -2218,11 +2387,21 @@ const createCustomMonthActionUI = (monthsBack) => {
       Object.assign(nameSpan.style, {
         fontWeight: 'bold', color: '#0065b3', fontSize: '18px'
       });
-      nameSpan.innerText = 'Fetching name...';
+      nameSpan.innerText = isExactDashboardPage() ? 'Fetching name...' : 'Agent';
+      chrome.storage.local.get(['selectedAgentName'], (res) => {
+        if (res && res.selectedAgentName) {
+          nameSpan.innerText = res.selectedAgentName;
+          updateMinimizedStatus();
+        }
+      });
   
       const buttonContainer = createButtonContainer(popup);
       const spinner = createSpinner();
-      spinner.style.display = 'flex'; // 🚀 Show it for initial fetch
+      if (isExactDashboardPage()) {
+        spinner.style.display = 'flex'; // 🚀 Show it for initial fetch only on dashboard
+      } else {
+        spinner.style.display = 'none';
+      }
   
       // Create Minimized Status Bar (Hidden by default)
       const minStatus = document.createElement('div');
@@ -2238,7 +2417,7 @@ const createCustomMonthActionUI = (monthsBack) => {
 
       createMinimizedBar(); // Create the hidden bar initially
 
-      showInitialOverlay(); // 🌫️ Show overlay initially
+      showInitialOverlay(); // 🌫️ Show overlay initially (only if on exact dashboard URL)
       document.body.appendChild(popup);
       return { popup, nameSpan, spinner, buttonContainer };
     };
@@ -2273,22 +2452,28 @@ const createCustomMonthActionUI = (monthsBack) => {
     
   
     // ====== DASHBOARD HANDLERS ======
+    let isFetchingNameActive = false;
+
     const tryClickProfile = (nameSpan, spinner, buttonContainer) => {
-        const currentUrl = window.location.href;
-        if (currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary') || currentUrl.includes('#auth/login') || currentUrl.includes('#/auth/resetpwd') || currentUrl.includes('#/auth/verifyotp') || currentUrl.includes('#/auth/changepwd')) {
-            console.log('🛑 [showPopup] Login/Portability URL detected! Skipping agent name fetching.');
-            if (nameSpan) nameSpan.innerText = 'Agent';
-            if (spinner) spinner.style.display = 'none';
-            if (buttonContainer) buttonContainer.style.display = 'flex';
-            updateMinimizedStatus();
-            removeInitialOverlay();
+        // ONLY allow initiating agent name fetch on exact dashboard page!
+        if (!isExactDashboardPage() && !isFetchingNameActive) {
+            console.log('🛑 [showPopup] Not exact dashboard URL! Skipping agent name fetching.');
+            chrome.storage.local.get(['selectedAgentName'], (res) => {
+                if (nameSpan) nameSpan.innerText = res?.selectedAgentName || 'Agent';
+                if (spinner) spinner.style.display = 'none';
+                if (buttonContainer) buttonContainer.style.display = 'flex';
+                updateMinimizedStatus();
+                removeInitialOverlay();
+            });
             return;
         }
 
+        isFetchingNameActive = true;
         let attempts = 0;
         const maxAttempts = 5;
 
         const handleFailureAndReload = () => {
+            isFetchingNameActive = false;
             let failCount = parseInt(sessionStorage.getItem('name_fetch_fail_count') || '0', 10);
             failCount++;
             if (failCount >= 3) {
@@ -2337,6 +2522,7 @@ const createCustomMonthActionUI = (monthsBack) => {
                     updateMinimizedStatus();
                     removeInitialOverlay();
                     isNameFetchComplete = true; // ✅ Name found, cleanup can start
+                    isFetchingNameActive = false;
 
                     // If we found it on profile page, let's go back to dashboard
                     const isProfilePage = window.location.href.includes('profile');
@@ -2705,20 +2891,27 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         }
 
         const table = document.querySelector('.proposalDetails-tbl');
+        const isTableHidden = table && (table.hasAttribute('hidden') || table.hidden === true || window.getComputedStyle(table).display === 'none');
+        const commContainer = document.querySelector('.Commission_details_container');
+        const isCommNoData = commContainer && commContainer.textContent.toLowerCase().includes('no data found');
+
         const rows = table ? table.querySelectorAll('tbody tr') : [];
         const tableText = table ? table.textContent.toLowerCase() : '';
         const bodyText = document.body ? document.body.textContent.toLowerCase() : '';
 
-        const isExplicitNoData = tableText.includes('no data found') || 
+        const isExplicitNoData = isCommNoData || 
+                                 isTableHidden || 
+                                 tableText.includes('no data found') || 
                                  tableText.includes('no record found') || 
                                  tableText.includes('no records found') || 
                                  tableText.includes('no data available') ||
                                  tableText.includes('no record') ||
                                  tableText.includes('no data') ||
-                                 (bodyText.includes('no data found') && !table) ||
-                                 (bodyText.includes('no record found') && !table);
+                                 (bodyText.includes('no data found') && (!table || isTableHidden)) ||
+                                 (bodyText.includes('no record found') && (!table || isTableHidden));
 
         const hasData = rows.length > 0 && 
+                        !isTableHidden &&
                         !rows[0].textContent.toLowerCase().includes('no record') && 
                         !rows[0].textContent.toLowerCase().includes('no data') &&
                         !isExplicitNoData;
@@ -2735,27 +2928,39 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
           const liveModal = document.getElementById('liveExtractModal');
           if (liveModal) liveModal.remove();
 
-          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], (res) => {
+          chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_account_attempts', 'autopilot_index', 'autopilot_agents'], (res) => {
               if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
-                  console.log('🤖 Autopilot: No data / table found on proposal page ("No Data Found"). Logging out & logging in to next account...');
-                  const agents = res.autopilot_agents || [];
-                  const nextIndex = (res.autopilot_index + 1) % (agents.length || 1);
-                  const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
-                  chrome.storage.local.set({
-                      autopilot_index: nextIndex,
-                      autopilot_account_attempts: 0,
-                      autopilot_last_active_time: Date.now(),
-                      autopilot_next_login_time: Date.now() + delayMs
-                  }, () => {
-                      const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
-                      if (logoutBtn) {
-                          logoutBtn.click();
-                          console.log(`🤖 Autopilot: Logged out due to 'No Data Found'. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
-                      } else {
-                          window.location.hash = '#/auth/login';
+                  const currentAttempts = res.autopilot_account_attempts || 0;
+                  if (currentAttempts < 2) {
+                      const nextAttempt = currentAttempts + 1;
+                      console.log(`🤖 Autopilot: 'No Data Found' on attempt ${currentAttempts + 1}. Attempting ${nextAttempt} month(s) prior record...`);
+                      chrome.storage.local.set({
+                          autopilot_account_attempts: nextAttempt,
+                          autopilot_last_active_time: Date.now()
+                      }, () => {
                           window.location.reload();
-                      }
-                  });
+                      });
+                  } else {
+                      console.log('🤖 Autopilot: No data / table found on all 3 attempted months ("No Data Found"). Logging out & logging in to next account...');
+                      const agents = res.autopilot_agents || [];
+                      const nextIndex = (res.autopilot_index + 1) % (agents.length || 1);
+                      const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                      chrome.storage.local.set({
+                          autopilot_index: nextIndex,
+                          autopilot_account_attempts: 0,
+                          autopilot_last_active_time: Date.now(),
+                          autopilot_next_login_time: Date.now() + delayMs
+                      }, () => {
+                          const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                          if (logoutBtn) {
+                              logoutBtn.click();
+                              console.log(`🤖 Autopilot: Logged out after 3 'No Data Found' attempts. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
+                          } else {
+                              window.location.hash = '#/auth/login';
+                              window.location.reload();
+                          }
+                      });
+                  }
               }
           });
           return;
@@ -3799,22 +4004,32 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         overlay.id = 'extraction-game-overlay';
         extractionOverlayEl = overlay;
 
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_agents', 'autopilot_index'], (res) => {
+        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_agents', 'autopilot_index', 'show_master_overlay'], (res) => {
             if (!extractionOverlayEl || extractionOverlayEl !== overlay) return;
 
             const isMasterMode = !!(res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused);
 
             if (isMasterMode) {
+                let isOverlayVisible = res.show_master_overlay !== false;
+                const localShow = localStorage.getItem('show_master_overlay');
+                if (localShow === 'false') isOverlayVisible = false;
+                if (localShow === 'true') isOverlayVisible = true;
+
                 // 👑 MASTER MODE: Light Bright Frosted Glassy Overlay with macOS Browser Window Card
+                const savedOpacityStr = localStorage.getItem('master_overlay_opacity');
+                const savedOpacity = savedOpacityStr !== null ? parseInt(savedOpacityStr, 10) : 100;
+                const alpha = savedOpacity / 100;
+
                 Object.assign(overlay.style, {
                     position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-                    backgroundColor: 'rgba(255, 255, 255, 0.35)',
-                    backdropFilter: 'blur(8px) saturate(120%)',
-                    webkitBackdropFilter: 'blur(8px) saturate(120%)',
+                    backgroundColor: isOverlayVisible ? `rgba(255, 255, 255, ${0.35 * alpha})` : 'transparent',
+                    backdropFilter: isOverlayVisible ? (savedOpacity === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`) : 'none',
+                    webkitBackdropFilter: isOverlayVisible ? (savedOpacity === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`) : 'none',
                     zIndex: '10001', display: 'flex', flexDirection: 'column',
                     alignItems: 'center', justifyContent: 'center', color: '#0f172a',
                     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-                    transition: 'all 0.4s ease', opacity: '1'
+                    transition: 'all 0.4s ease', opacity: '1',
+                    pointerEvents: isOverlayVisible ? 'auto' : 'none'
                 });
 
                 let currentAgentName = '';
@@ -3825,9 +4040,6 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         currentAgentName = agentObj.name || agentObj.email;
                     }
                 }
-
-                const savedOpacityStr = localStorage.getItem('master_overlay_opacity');
-                const savedOpacity = savedOpacityStr !== null ? parseInt(savedOpacityStr, 10) : 100;
 
                 const agentInfoHtml = currentAgentName 
                     ? `<div style="margin-top: 10px; font-size: 12px; color: #475569; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; background: rgba(241, 245, 249, 0.85); padding: 4px 14px; border-radius: 20px; border: 1px solid #e2e8f0;">
@@ -3850,6 +4062,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         animation: macWindowPop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
                         text-align: left;
                         transition: opacity 0.2s ease;
+                        display: ${isOverlayVisible ? 'block' : 'none'};
                     ">
                         <!-- macOS Title Bar -->
                         <div style="
@@ -4052,7 +4265,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         user-select: none;
                         box-sizing: border-box;
                         opacity: 0;
-                        pointer-events: none;
+                        pointer-events: auto !important;
                         transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
                     ">
                         <!-- Header Icon -->
@@ -4100,6 +4313,34 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                                 padding: 3px 4px; border-radius: 5px; cursor: pointer; transition: all 0.15s; width: 100%;
                             " title="0% Glass Opacity (Transparent Background)">0%</button>
                         </div>
+
+                        <!-- Master Overlay Toggle (Card Visibility ON/OFF) -->
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; border-top: 1px solid #e2e8f0; padding-top: 8px; margin-top: 2px;">
+                            <span style="font-size: 8px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">OVERLAY</span>
+                            <label style="position: relative; display: inline-block; width: 34px; height: 18px; cursor: pointer;">
+                                <input type="checkbox" id="masterOverlayToggleInput" ${isOverlayVisible ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+                                <span id="masterToggleSlider" style="
+                                    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+                                    background-color: ${isOverlayVisible ? '#2563eb' : '#cbd5e1'};
+                                    transition: .3s; border-radius: 18px;
+                                ">
+                                    <span id="masterToggleKnob" style="
+                                        position: absolute; content: ''; height: 14px; width: 14px; left: 2px; bottom: 2px;
+                                        background-color: white; transition: .3s; border-radius: 50%;
+                                        transform: ${isOverlayVisible ? 'translateX(16px)' : 'translateX(0)'};
+                                    "></span>
+                                </span>
+                            </label>
+                            <span id="masterOverlayToggleLabel" style="font-size: 9px; font-weight: 800; color: ${isOverlayVisible ? '#2563eb' : '#64748b'};">${isOverlayVisible ? 'ON' : 'OFF'}</span>
+                        </div>
+
+                        <!-- 📥 Daily Console Logs Download Button -->
+                        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; border-top: 1px solid #e2e8f0; padding-top: 6px; margin-top: 4px;">
+                            <button id="downloadDailyLogsBtn" style="
+                                border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; font-size: 9px; font-weight: 800;
+                                padding: 4px 2px; border-radius: 6px; cursor: pointer; transition: all 0.15s; width: 100%;
+                            " title="Download Today's Persistent Log File">📥 LOGS</button>
+                        </div>
                     </div>
 
                     <style>
@@ -4128,6 +4369,10 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     const preset100 = overlay.querySelector('#preset100Btn');
                     const preset0 = overlay.querySelector('#preset0Btn');
                     const mainCard = overlay.querySelector('.mac-dialog-window');
+                    const overlayToggle = overlay.querySelector('#masterOverlayToggleInput');
+                    const overlayToggleSlider = overlay.querySelector('#masterToggleSlider');
+                    const overlayToggleKnob = overlay.querySelector('#masterToggleKnob');
+                    const overlayToggleLabel = overlay.querySelector('#masterOverlayToggleLabel');
 
                     let autoHideTimer = null;
                     let isSidebarOpen = false;
@@ -4200,15 +4445,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         if (valLabel) valLabel.innerText = numericVal + '%';
                         if (slider) slider.value = numericVal;
 
-                        // 🛡️ Mac browser dialog window is NOT impacted - stays 100% visible
                         if (mainCard) {
                             mainCard.style.opacity = '1';
                         }
                         
-                        // 🪟 ONLY background glass backdrop & blur are controlled by the slider
-                        overlay.style.backgroundColor = `rgba(255, 255, 255, ${0.35 * alpha})`;
-                        overlay.style.backdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
-                        overlay.style.webkitBackdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
+                        const isCurrentlyChecked = overlayToggle ? overlayToggle.checked : true;
+                        if (isCurrentlyChecked) {
+                            overlay.style.backgroundColor = `rgba(255, 255, 255, ${0.35 * alpha})`;
+                            overlay.style.backdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
+                            overlay.style.webkitBackdropFilter = numericVal === 0 ? 'none' : `blur(${8 * alpha}px) saturate(${100 + 20 * alpha}%)`;
+                        }
 
                         localStorage.setItem('master_overlay_opacity', numericVal);
                         resetAutoHideTimer();
@@ -4224,6 +4470,111 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     }
                     if (preset0) {
                         preset0.addEventListener('click', () => updateOverlayOpacity(0));
+                    }
+
+                    if (overlayToggle) {
+                        overlayToggle.addEventListener('change', (e) => {
+                            const isChecked = e.target.checked;
+                            localStorage.setItem('show_master_overlay', isChecked ? 'true' : 'false');
+                            chrome.storage.local.set({ show_master_overlay: isChecked });
+
+                            if (overlayToggleSlider) overlayToggleSlider.style.backgroundColor = isChecked ? '#2563eb' : '#cbd5e1';
+                            if (overlayToggleKnob) overlayToggleKnob.style.transform = isChecked ? 'translateX(16px)' : 'translateX(0)';
+                            if (overlayToggleLabel) {
+                                overlayToggleLabel.innerText = isChecked ? 'ON' : 'OFF';
+                                overlayToggleLabel.style.color = isChecked ? '#2563eb' : '#64748b';
+                            }
+
+                            if (mainCard) {
+                                mainCard.style.display = isChecked ? 'block' : 'none';
+                            }
+                            
+                            if (isChecked) {
+                                overlay.style.pointerEvents = 'auto';
+                                updateOverlayOpacity(slider ? slider.value : savedOpacity);
+                            } else {
+                                overlay.style.pointerEvents = 'none';
+                                overlay.style.backgroundColor = 'transparent';
+                                overlay.style.backdropFilter = 'none';
+                                overlay.style.webkitBackdropFilter = 'none';
+                            }
+                            resetAutoHideTimer();
+                        });
+                    }
+
+                    const downloadLogsBtn = overlay.querySelector('#downloadDailyLogsBtn');
+                    if (downloadLogsBtn) {
+                        downloadLogsBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            chrome.storage.local.get(['log_date_list'], (res) => {
+                                let dateList = res.log_date_list || [];
+                                const todayStr = getFormattedTimestamp().dateStr;
+                                if (!dateList.includes(todayStr)) dateList.push(todayStr);
+                                dateList.sort().reverse(); // Latest date first
+
+                                function downloadSingleLogFile(targetDateStr) {
+                                    const dateKey = 'logs_' + targetDateStr;
+                                    chrome.storage.local.get([dateKey], (resStorage) => {
+                                        const logs = resStorage[dateKey] || [];
+                                        const textContent = logs.length > 0 ? logs.join('\n') : `[${getFormattedTimestamp().fullTimestamp}] [INFO] [System] No logs recorded for ${targetDateStr}.`;
+                                        const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = `extension_daily_logs_${targetDateStr}.txt`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        setTimeout(() => {
+                                            document.body.removeChild(a);
+                                            URL.revokeObjectURL(url);
+                                        }, 100);
+                                    });
+                                }
+
+                                if (dateList.length <= 1) {
+                                    downloadSingleLogFile(todayStr);
+                                } else {
+                                    const existingModal = document.getElementById('logDateSelectorModal');
+                                    if (existingModal) existingModal.remove();
+
+                                    const modal = document.createElement('div');
+                                    modal.id = 'logDateSelectorModal';
+                                    modal.style.cssText = 'position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:100010; background:#ffffff; border-radius:16px; box-shadow:0 20px 40px rgba(0,0,0,0.3); padding:20px; width:310px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; text-align:center; border:1px solid #cbd5e1;';
+                                    
+                                    let modalHtml = '<div style="font-size:14px; font-weight:700; color:#1e293b; margin-bottom:12px;">📅 Select Daily Log File (Latest 10 Days)</div>';
+                                    modalHtml += '<div style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-bottom:14px; padding-right:4px;">';
+
+                                    dateList.forEach((dStr) => {
+                                        const isToday = dStr === todayStr;
+                                        modalHtml += `<button class="dl-log-item-btn" data-date="${dStr}" style="
+                                            display:flex; justify-content:space-between; align-items:center; background:${isToday ? '#eff6ff' : '#f8fafc'};
+                                            border:1px solid ${isToday ? '#93c5fd' : '#e2e8f0'}; border-radius:8px; padding:8px 12px;
+                                            font-size:12px; font-weight:600; color:${isToday ? '#1d4ed8' : '#334155'}; cursor:pointer; transition:all 0.15s;
+                                        ">
+                                            <span>📄 ${dStr} ${isToday ? '(Today)' : ''}</span>
+                                            <span style="font-size:11px; font-weight:700; color:#2563eb;">📥 Download</span>
+                                        </button>`;
+                                    });
+
+                                    modalHtml += '</div>';
+                                    modalHtml += '<button id="closeLogModalBtn" style="background:#cbd5e1; border:none; color:#334155; font-size:12px; font-weight:700; padding:6px 16px; border-radius:8px; cursor:pointer;">Close</button>';
+
+                                    modal.innerHTML = modalHtml;
+                                    document.body.appendChild(modal);
+
+                                    modal.querySelectorAll('.dl-log-item-btn').forEach((btn) => {
+                                        btn.addEventListener('click', () => {
+                                            const targetD = btn.getAttribute('data-date');
+                                            downloadSingleLogFile(targetD);
+                                            modal.remove();
+                                        });
+                                    });
+
+                                    const closeBtn = modal.querySelector('#closeLogModalBtn');
+                                    if (closeBtn) closeBtn.addEventListener('click', () => modal.remove());
+                                }
+                            });
+                        });
                     }
                 }, 0);
             } else {
@@ -6997,15 +7348,15 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                         const elapsed = Date.now() - autopilot5sTimer;
                         if (elapsed >= 10000) {
                             const attempts = res.autopilot_account_attempts || 0;
-                            const monthsToFilter = attempts >= 1 ? 0 : 1; // 1st attempt: 1-Month, 2nd attempt: Current Month (0-Month)
-                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter === 0 ? 'Current Month' : monthsToFilter + '-Month'} filter (Attempt ${attempts + 1})...`);
+                            const monthsToFilter = attempts >= 2 ? 2 : (attempts === 1 ? 1 : 0); // Attempt 0: Current Month (0-Month), Attempt 1: 1-Month Back, Attempt 2: 2-Months Back
+                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter === 0 ? 'Current Month' : monthsToFilter + '-Month Back'} filter (Attempt ${attempts + 1}/3)...`);
                             autopilotState = 'TRIGGER_2M_FILTER';
                             autopilotFilterTriggerTime = Date.now();
                             // Guard: only trigger filter ONCE
                             if (!autopilotFilterTriggered && popup && !customUI && !liveModal && !completedModal && !isAutoSyncRunning) {
                                 autopilotFilterTriggered = true;
                                 handleCustomMonthClick(popup, monthsToFilter);
-                                console.log(`🤖 Autopilot: handleCustomMonthClick(${monthsToFilter}) triggered (Attempt ${attempts + 1}).`);
+                                console.log(`🤖 Autopilot: handleCustomMonthClick(${monthsToFilter}) triggered (Attempt ${attempts + 1}/3).`);
                             }
                         } else {
                             console.log('🤖 Autopilot State: [WAIT_10S_DELAY] Delaying (' + Math.round((10000 - elapsed) / 1000) + 's left)...');
@@ -7050,9 +7401,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 const lastActive = res.autopilot_last_active_time || Date.now();
                 if (Date.now() - lastActive > 180000) { // 3 Minutes (180,000ms) Hard Timeout
                     const currentAttempts = res.autopilot_account_attempts || 0;
-                    if (currentAttempts >= 1) {
-                        // Attempt 2 (Current Month filter) also exceeded 3 minutes -> Logout & Skip to Next Agent!
-                        console.error('❌ Autopilot: Attempt 2 (Current Month filter) also exceeded 3 minutes loading! Logging out & skipping to next agent...');
+                    if (currentAttempts >= 2) {
+                        // Attempt 3 (2-Months Back filter) also exceeded 3 minutes -> Logout & Skip to Next Agent!
+                        console.error('❌ Autopilot: Attempt 3 (2-Months Back filter) also exceeded 3 minutes loading! Logging out & skipping to next agent...');
                         const nextIndex = (res.autopilot_index + 1) % (res.autopilot_agents ? res.autopilot_agents.length : 1);
                         const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
                         chrome.storage.local.set({ 
@@ -7070,11 +7421,12 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                             }
                         });
                     } else {
-                        // Attempt 1 (1-Month filter) exceeded 3 minutes -> Reload & try Attempt 2 (Current Month filter)
-                        console.warn('⚠️ Autopilot: Attempt 1 (1-Month filter) exceeded 3 minutes loading! Reloading to try Attempt 2 (Current Month filter)...');
+                        // Attempt < 2 exceeded 3 minutes -> Reload & try next month attempt
+                        const nextAttempt = currentAttempts + 1;
+                        console.warn(`⚠️ Autopilot: Attempt ${currentAttempts + 1} exceeded 3 minutes loading! Reloading to try Attempt ${nextAttempt + 1}...`);
                         chrome.storage.local.set({ 
                             autopilot_last_active_time: Date.now(),
-                            autopilot_account_attempts: 1
+                            autopilot_account_attempts: nextAttempt
                         }, () => {
                             window.location.reload();
                         });
