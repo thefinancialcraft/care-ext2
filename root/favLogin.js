@@ -87,6 +87,11 @@
         var cleanText = errorText.trim();
         if (!cleanText || cleanText.length < 3) return;
 
+        var lower = cleanText.toLowerCase();
+        if (lower.includes('important update') || lower.includes('announcement') || lower.includes('faveo plus app') || lower.includes('new update') || lower.includes('whats new') || lower.includes("what's new")) {
+            return; // 🛡️ Ignore non-error announcements and updates
+        }
+
         var now = Date.now();
         if (cleanText === lastLoggedSupabaseErrorText && (now - lastLoggedSupabaseErrorTime) < 10000) {
             return;
@@ -217,7 +222,14 @@
     };
 
     var handleOtpFetchFailure = function(agent) {
-        chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+        chrome.storage.local.get(['favPendingResetId', 'is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+            var currUrl = window.location.href.toLowerCase();
+            if (res.favPendingResetId || currUrl.includes('resetpwd') || currUrl.includes('verifyotp') || currUrl.includes('changepwd')) {
+                console.warn('⚠️ OTP Fetch failed during Password Reset. Skipping to next agent immediately (NO 10-min pause)...');
+                skipToNextAgentImmediately();
+                return;
+            }
+
             var delayMs = 10 * 60 * 1000; // 10 minutes pause/delay
             var nextIndex = res.autopilot_index;
             if (res.autopilot_agents && res.autopilot_agents.length > 0) {
@@ -264,59 +276,24 @@
     };
 
     var handleInvalidOtpError = function(agent, statusMsg, loader) {
-        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Checking Resend...'; statusMsg.style.color = '#ff5252'; }
+        console.warn('⚠️ [favLogin] "Please Enter Valid otp Number" error detected! Moving to next agent immediately...');
+        if (statusMsg) { statusMsg.innerText = 'INVALID OTP - Moving to next agent...'; statusMsg.style.color = '#ff5252'; }
         if (loader) loader.style.display = 'none';
 
-        chrome.storage.local.get(['invalid_otp_resend_done', 'favPendingResetAgent', 'autopilot_agents', 'autopilot_index', 'selectedAgentId'], function(res) {
-            var targetAgent = agent || res.favPendingResetAgent;
-            if (!targetAgent && res.autopilot_agents && res.autopilot_agents.length > 0) {
-                var idx = res.autopilot_index || 0;
-                targetAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+        // 🧹 Remove error element from DOM to avoid repeated triggers
+        var errEls = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger');
+        for (var i = 0; i < errEls.length; i++) {
+            var el = errEls[i];
+            var txt = (el.innerText || el.textContent || '').toLowerCase();
+            if (txt.includes('valid otp') || txt.includes('invalid otp')) {
+                try { el.remove(); } catch(e) {}
             }
+        }
 
-            if (res.invalid_otp_resend_done) {
-                console.warn('⚠️ [favLogin] Invalid OTP error occurred AGAIN after Resend OTP. Skipping agent immediately...');
-                if (statusMsg) { statusMsg.innerText = 'INVALID OTP AGAIN - Skipping agent...'; statusMsg.style.color = '#ff5252'; }
-                
-                chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
-                    setTimeout(function() {
-                        skipToNextAgentImmediately();
-                    }, 1500);
-                });
-                return;
-            }
-
-            console.log('🔄 [favLogin] "Please Enter Valid otp Number" detected! Clicking Resend OTP and re-fetching...');
-            if (statusMsg) { statusMsg.innerText = 'Invalid OTP — Clicking Resend OTP...'; statusMsg.style.color = '#ff9800'; }
-
-            var resendBtnEl = document.querySelector('.unlock a') ||
-                              document.querySelector('#resend_otp_btn') ||
-                              document.querySelector('a.unlock') ||
-                              Array.from(document.querySelectorAll('a, button')).find(function(el) {
-                                  return (el.innerText || el.textContent || '').toLowerCase().includes('resend');
-                              });
-
-            chrome.storage.local.set({ invalid_otp_resend_done: true }, function() {
-                chrome.storage.local.remove(['last_filled_otp'], function() {
-                    if (resendBtnEl && resendBtnEl.isConnected) {
-                        console.log('👆 Resend OTP button clicked on DOM:', resendBtnEl);
-                        resendBtnEl.click();
-                    } else {
-                        console.warn('⚠️ Resend OTP button element not found on DOM, attempting OTP re-fetch...');
-                    }
-
-                    setTimeout(function() {
-                        if (statusMsg) { statusMsg.innerText = 'Fetching new OTP after resend...'; statusMsg.style.color = '#4fc3f7'; }
-                        if (loader) loader.style.display = 'flex';
-                        if (targetAgent) {
-                            fetchAndFillOtp(targetAgent, 0);
-                        } else {
-                            console.warn('⚠️ Target agent not available for OTP re-fetch. Skipping...');
-                            skipToNextAgentImmediately();
-                        }
-                    }, 3000);
-                });
-            });
+        chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
+            setTimeout(function() {
+                skipToNextAgentImmediately();
+            }, 1000);
         });
     };
 
@@ -326,14 +303,17 @@
             return;
         }
         retryCount = retryCount || 0;
-        var apiUrl = getOtpApiUrl(agent);
+
         var statusMsg = document.getElementById('favLoginStatus');
-        
+        var loader = document.getElementById('favDancingDots');
+
+        if (statusMsg) { statusMsg.innerText = 'Fetching OTP (Attempt ' + (retryCount + 1) + '/5)...'; statusMsg.style.color = '#4fc3f7'; }
+        if (loader) loader.style.display = 'flex';
+
+        var apiUrl = getOtpApiUrl(agent);
         console.log('🔍 [favLogin] Fetching OTP for agent:', agent, 'API URL:', apiUrl);
 
         if (apiUrl) {
-            if (statusMsg) statusMsg.innerText = 'Fetching OTP (Attempt ' + (retryCount + 1) + '/5)...';
-            
             fetch(apiUrl)
                 .then(function(res) { return res.json(); })
                 .then(function(data) {
@@ -367,18 +347,10 @@
                                     fetchAndFillOtp(agent, retryCount + 1);
                                 }, 5000);
                             } else {
-                                chrome.storage.local.get(['invalid_otp_resend_done'], function(res) {
-                                    if (!res.invalid_otp_resend_done) {
-                                        console.warn('⚠️ OTP request timed out after 5 attempts. Triggering Resend OTP...');
-                                        if (statusMsg) statusMsg.innerText = 'OTP timeout (5 attempts) — Triggering Resend OTP...';
-                                        handleInvalidOtpError(agent, statusMsg, null);
-                                    } else {
-                                        console.warn('⚠️ OTP request timed out after Resend OTP. Skipping agent immediately...');
-                                        if (statusMsg) statusMsg.innerText = 'OTP timeout after Resend — Skipping agent...';
-                                        chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
-                                            skipToNextAgentImmediately();
-                                        });
-                                    }
+                                console.warn('⚠️ OTP request timed out after 5 attempts. Skipping agent immediately...');
+                                if (statusMsg) statusMsg.innerText = 'OTP timeout (5 attempts) — Skipping agent...';
+                                chrome.storage.local.remove(['invalid_otp_resend_done', 'last_filled_otp'], function() {
+                                    skipToNextAgentImmediately();
                                 });
                             }
                         }
@@ -654,7 +626,14 @@
         container.appendChild(list);
 
         var handleAutopilotError = function() {
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+            chrome.storage.local.get(['favPendingResetId', 'is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(res) {
+                var currUrl = window.location.href.toLowerCase();
+                if (res.favPendingResetId || currUrl.includes('resetpwd') || currUrl.includes('verifyotp') || currUrl.includes('changepwd')) {
+                    console.warn('⚠️ Error during Password Reset workflow. Skipping to next agent immediately (NO 10-min pause)...');
+                    skipToNextAgentImmediately();
+                    return;
+                }
+
                 if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents && res.autopilot_agents.length > 0) {
                     var nextIndex = (res.autopilot_index + 1) % res.autopilot_agents.length;
                     var delayMs = 10 * 60 * 1000; // 10 minutes pause/delay
@@ -1664,15 +1643,15 @@
                         if (statusMsg) { statusMsg.innerText = 'FILL CORRECT DETAILS'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                    } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it')) {
-                        if (statusMsg) { statusMsg.innerText = 'PASSWORD EXPIRED - Resetting...'; statusMsg.style.color = '#ff9800'; }
+                    } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it') || txt.toLowerCase().includes('maximum login attempt limit') || txt.toLowerCase().includes('userid is blocked') || txt.toLowerCase().includes('user id is blocked') || txt.toLowerCase().includes('reset your password')) {
+                        if (statusMsg) { statusMsg.innerText = 'USER BLOCKED - Resetting Password...'; statusMsg.style.color = '#ff9800'; }
                         if (loader) loader.style.display = 'flex';
                         foundError = true;
 
                         var agentName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Agent';
-                        var agentId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || aId || '';
+                        var agentId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '';
 
-                        console.warn('⚠️ [favLogin] "Your password has expired. Kindly reset it." detected for agent:', agentId, '! Triggering Create/Reset Password workflow...');
+                        console.warn('⚠️ [favLogin] "UserId is blocked / Reset Password" error detected for agent:', agentId, '! Triggering Create/Reset Password workflow...');
 
                         chrome.storage.local.set({ 
                             favPendingResetId: agentId, 
@@ -1683,7 +1662,7 @@
                                 window.location.hash = '#/auth/resetpwd';
                             }, 800);
                         });
-                    } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count') || txt.includes('UserId is blocked') || txt.includes('maximum login attempt limit')) {
+                    } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count')) {
                         if (statusMsg) { statusMsg.innerText = 'MAX OTP LIMIT REACHED'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
@@ -1874,11 +1853,11 @@
             var errEl = document.querySelector('.error-message.text-center, .error-message, div.alert-danger');
             if (errEl) {
                 var errText = (errEl.innerText || errEl.textContent || '').toLowerCase();
-                if (errText.includes('password has expired') || errText.includes('kindly reset it')) {
+                if (errText.includes('password has expired') || errText.includes('kindly reset it') || errText.includes('maximum login attempt limit') || errText.includes('userid is blocked') || errText.includes('user id is blocked') || errText.includes('reset your password')) {
                     var isAlreadyHandlingExpired = popup && popup.dataset && popup.dataset.handlingExpiredPwd === 'true';
                     if (!isAlreadyHandlingExpired) {
                         if (popup) popup.dataset.handlingExpiredPwd = 'true';
-                        console.warn('🚨 [favLogin] "Your password has expired. Kindly reset it." error detected on page! Triggering Reset Password...');
+                        console.warn('🚨 [favLogin] "UserId is blocked / Reset Password" error detected on page! Triggering Reset Password...');
 
                         chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], function(res) {
                             var agentId = res.selectedAgentId;
@@ -1959,33 +1938,57 @@
                 var isAlreadyHandlingPwdSuccess = popup && popup.dataset && popup.dataset.handlingPwdSuccess === 'true';
                 if (!isAlreadyHandlingPwdSuccess) {
                     if (popup) popup.dataset.handlingPwdSuccess = 'true';
-                    console.log('🎉 [favLogin] "Password changed successfully" detected! Resetting extension & redirecting to login...');
-
-                    chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword'], function(res) {
-                        if (res.favPendingResetId && res.favPendingResetNewPassword) {
-                            chrome.runtime.sendMessage({ 
-                                type: 'UPDATE_PASSWORD', 
-                                payload: { userId: res.favPendingResetId, newPassword: res.favPendingResetNewPassword } 
-                            }, function(resp) {
-                                console.log('📡 [favLogin] Google Sheet password updated:', resp);
-                                chrome.storage.local.set({ isAuthorized: false }, function() {
-                                    chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
-                                        console.log('🔄 [favLogin] Extension reset & reloading page!');
-                                        window.location.reload();
-                                    });
-                                });
-                            });
-                        }
-                    });
+                    console.log('🎉 [favLogin] "Password changed successfully" detected! Syncing new password to Google Sheet...');
 
                     var listContainer = document.getElementById('agentListContainer');
                     if (listContainer) {
-                        listContainer.innerHTML = '<div style="color:#4caf50; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">Password changed successfully!!</div>';
+                        listContainer.innerHTML = '<div style="color:#ff9800; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">Password changed! Syncing with Google Sheet...</div>';
                     }
 
-                    setTimeout(function() {
-                        window.location.hash = '#/auth/login';
-                    }, 2500);
+                    chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword'], function(res) {
+                        var rId = res.favPendingResetId;
+                        var rPass = res.favPendingResetNewPassword;
+
+                        if (rId && rPass) {
+                            console.log('📡 [favLogin] Sending UPDATE_PASSWORD to Google Sheet for:', rId);
+                            chrome.runtime.sendMessage({ 
+                                type: 'UPDATE_PASSWORD', 
+                                payload: { userId: rId, newPassword: rPass } 
+                            }, function(resp) {
+                                console.log('📡 [favLogin] Google Sheet password updated response:', resp);
+
+                                if (resp && (resp.success || resp.status === 'success' || resp.result === 'success' || !resp.error)) {
+                                    console.log('✅ Google Sheet updated successfully! Proceeding to login redirect...');
+                                    if (listContainer) {
+                                        listContainer.innerHTML = '<div style="color:#4caf50; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">Password updated in Sheet! Redirecting...</div>';
+                                    }
+
+                                    chrome.storage.local.set({ isAuthorized: false }, function() {
+                                        chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                                            setTimeout(function() {
+                                                window.location.hash = '#/auth/login';
+                                                setTimeout(function() { window.location.reload(); }, 600);
+                                            }, 1200);
+                                        });
+                                    });
+                                } else {
+                                    console.error('❌ Failed to update password in Google Sheet:', resp);
+                                    if (listContainer) {
+                                        listContainer.innerHTML = '<div style="color:#ff5252; padding:20px 10px; font-size:13px; text-align:center; font-weight:600;">Sheet Sync Failed. Retrying...</div>';
+                                    }
+                                    setTimeout(function() {
+                                        if (popup) popup.dataset.handlingPwdSuccess = 'false';
+                                    }, 3000);
+                                }
+                            });
+                        } else {
+                            console.warn('⚠️ No pending reset ID/Password found in storage. Proceeding to login...');
+                            chrome.storage.local.set({ isAuthorized: false }, function() {
+                                window.location.hash = '#/auth/login';
+                                setTimeout(function() { window.location.reload(); }, 600);
+                            });
+                        }
+                    });
                 }
             }
 
@@ -2110,18 +2113,23 @@
                             type: 'UPDATE_PASSWORD', 
                             payload: { userId: rId, newPassword: rPass } 
                         }, function(response) {
-                            console.log('📡 [favLogin] Google Sheet password updated:', response);
-                            chrome.storage.local.set({ isAuthorized: false }, function() {
-                                chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
-                                    console.log('🔄 [favLogin] Showing login popup and reloading page...');
-                                    var popupEl = document.getElementById('favLoginPopup');
-                                    if (popupEl) popupEl.remove();
-                                    createLoginPopup();
-                                    setTimeout(function() {
-                                        window.location.reload();
-                                    }, 1200);
+                            console.log('📡 [favLogin] Google Sheet password updated response:', response);
+                            if (response && (response.success || response.status === 'success' || response.result === 'success' || !response.error)) {
+                                console.log('✅ Google Sheet update confirmed! Clearing pending reset state and reloading page...');
+                                chrome.storage.local.set({ isAuthorized: false }, function() {
+                                    chrome.storage.local.remove(['favPendingResetId', 'favPendingResetAgent', 'favPendingResetNewPassword', 'favPendingResetName'], function() {
+                                        console.log('🔄 [favLogin] Showing login popup and reloading page...');
+                                        var popupEl = document.getElementById('favLoginPopup');
+                                        if (popupEl) popupEl.remove();
+                                        createLoginPopup();
+                                        setTimeout(function() {
+                                            window.location.reload();
+                                        }, 1200);
+                                    });
                                 });
-                            });
+                            } else {
+                                console.error('❌ Failed to update password in Google Sheet:', response);
+                            }
                         });
                     }
                 });

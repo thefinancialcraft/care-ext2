@@ -100,6 +100,11 @@
         const cleanText = errorText.trim();
         if (!cleanText || cleanText.length < 3) return;
 
+        const lower = cleanText.toLowerCase();
+        if (lower.includes('important update') || lower.includes('announcement') || lower.includes('faveo plus app') || lower.includes('new update') || lower.includes('whats new') || lower.includes("what's new")) {
+            return; // 🛡️ Ignore non-error announcements and updates
+        }
+
         const now = Date.now();
         if (cleanText === lastLoggedSupabaseErrorText && (now - lastLoggedSupabaseErrorTime) < 10000) {
             return;
@@ -2465,6 +2470,15 @@ const createCustomMonthActionUI = (monthsBack) => {
                 updateMinimizedStatus();
                 removeInitialOverlay();
             });
+            // 🛡️ Redirect to Dashboard if on Profile page when fetch is inactive
+            if (window.location.href.includes('profile')) {
+                console.warn('⚠️ [showPopup] Stuck on Profile page while name fetch is inactive! Redirecting to Dashboard...');
+                const dashBtn = document.querySelector('.side_dash_navigation .dropdown11') || 
+                                document.querySelector('.side_dash_navigation a') || 
+                                [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'dashboard');
+                if (dashBtn) dashBtn.click();
+                window.location.hash = '#/portal/dashboard';
+            }
             return;
         }
 
@@ -2527,8 +2541,12 @@ const createCustomMonthActionUI = (monthsBack) => {
                     // If we found it on profile page, let's go back to dashboard
                     const isProfilePage = window.location.href.includes('profile');
                     if (isProfilePage) {
-                        const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');
-                        dashboardLink?.click();
+                        console.log('🔄 Name found on Profile page! Navigating back to Dashboard...');
+                        const dashboardLink = document.querySelector('.side_dash_navigation .dropdown11') || 
+                                              document.querySelector('.side_dash_navigation a') || 
+                                              [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'dashboard');
+                        if (dashboardLink) dashboardLink.click();
+                        window.location.hash = '#/portal/dashboard';
                     }
                     return; 
                 }
@@ -2536,15 +2554,25 @@ const createCustomMonthActionUI = (monthsBack) => {
 
             // 🚀 2. If not found and haven't hit max, navigate and retry
             if (attempts < maxAttempts) {
-                const profileLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'My Profile');
-                const dashboardLink = [...document.querySelectorAll('a')].find(a => a.textContent.trim() === 'Dashboard');
+                const profileLink = document.querySelector('a[title="My Profile"]') || 
+                                    document.querySelector('.side_profile_navigation a') || 
+                                    [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'my profile');
+                const dashboardLink = document.querySelector('.side_dash_navigation .dropdown11') || 
+                                      document.querySelector('.side_dash_navigation a') || 
+                                      [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'dashboard');
 
                 if (window.location.href.includes('profile')) {
                     // We are on profile but didn't find it? Go back to dashboard to refresh state
-                    dashboardLink?.click();
+                    if (dashboardLink) dashboardLink.click();
+                    window.location.hash = '#/portal/dashboard';
                 } else if (profileLink) {
                     // On dashboard/other? Go to profile
                     profileLink.click();
+                    setTimeout(() => {
+                        if (!window.location.href.includes('profile')) {
+                            window.location.hash = '#/portal/profile/profileDetails';
+                        }
+                    }, 500);
                 }
 
                 // Wait for page load/navigation and retry
@@ -7113,6 +7141,17 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       if (location.href !== lastUrl) {
         lastUrl = location.href;
         runPopup();
+      }
+      // 🛡️ Guard against getting stuck on Profile Details URL when not actively fetching name
+      if (window.location.href.includes('profile/profileDetails') || window.location.href.includes('portal/profile')) {
+          if (!isFetchingNameActive) {
+              console.warn('⚠️ [showPopup] Stuck on Profile Details URL while name fetch is inactive/complete! Redirecting to Dashboard...');
+              const dashboardLink = document.querySelector('.side_dash_navigation .dropdown11') || 
+                                    document.querySelector('.side_dash_navigation a') || 
+                                    [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'dashboard');
+              if (dashboardLink) dashboardLink.click();
+              window.location.hash = '#/portal/dashboard';
+          }
       }
     }, 1000);
     

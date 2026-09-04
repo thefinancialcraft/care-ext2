@@ -589,6 +589,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     logSyncToSupabase(message.payload.status || 'FETCHING', message.payload.total || 0, message.payload.uploaded || 0, message.payload.error || null);
   }
   else if (message.type === 'LOG_SUPABASE_ERROR') {
+    const errorMsg = message.payload?.error_message || '';
+    const lowerMsg = errorMsg.toLowerCase();
+    if (lowerMsg.includes('important update') || lowerMsg.includes('announcement') || lowerMsg.includes('faveo plus app') || lowerMsg.includes('new update') || lowerMsg.includes('whats new') || lowerMsg.includes("what's new")) {
+      sendResponse({ success: true, ignored: true });
+      return true;
+    }
+
     const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
     
