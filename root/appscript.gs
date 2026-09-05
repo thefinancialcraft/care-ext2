@@ -319,12 +319,18 @@ function doPost(e) {
       if (!sheet) sheet = ss.getSheets()[0]; 
       
       const values = sheet.getDataRange().getValues();
-      let found = false;
+      const headers = values[0].map(h => String(h).trim().toLowerCase().replace(/ /g, '_'));
       
-      for (let i = 0; i < values.length; i++) {
-        // Search Column A (agent_id)
-        if (String(values[i][0]).trim() === userId) {
-          sheet.getRange(i + 1, 3).setValue(newPassword); // 🔑 Update Column C (agent_password)
+      let idColIdx = headers.findIndex(h => h.includes('agent_id'));
+      let pwdColIdx = headers.findIndex(h => h.includes('agent_password'));
+      
+      if (idColIdx === -1) idColIdx = 0; // Default Column A (0)
+      if (pwdColIdx === -1) pwdColIdx = 2; // Default Column C (2)
+      
+      let found = false;
+      for (let i = 1; i < values.length; i++) {
+        if (String(values[i][idColIdx]).trim() === userId) {
+          sheet.getRange(i + 1, pwdColIdx + 1).setValue(newPassword); // 🔑 Update agent password
           found = true;
           break;
         }

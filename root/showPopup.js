@@ -93,6 +93,7 @@
 
     // 🛡️ [SUPABASE DOM ERROR OBSERVER - MASTER MODE]
     let lastLoggedSupabaseErrorText = '';
+    let lastLoggedSupabaseErrorAgentId = '';
     let lastLoggedSupabaseErrorTime = 0;
 
     function logDomErrorToSupabase(errorText) {
@@ -104,14 +105,6 @@
         if (lower.includes('important update') || lower.includes('announcement') || lower.includes('faveo plus app') || lower.includes('new update') || lower.includes('whats new') || lower.includes("what's new")) {
             return; // 🛡️ Ignore non-error announcements and updates
         }
-
-        const now = Date.now();
-        if (cleanText === lastLoggedSupabaseErrorText && (now - lastLoggedSupabaseErrorTime) < 10000) {
-            return;
-        }
-
-        lastLoggedSupabaseErrorText = cleanText;
-        lastLoggedSupabaseErrorTime = now;
 
         chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], (res) => {
             let currentAgentId = res.selectedAgentId || '';
@@ -125,6 +118,16 @@
                     currentAgentName = currentAgent['agent name'] || currentAgent['agent_name'] || currentAgent['agentName'] || 'Agent';
                 }
             }
+
+            const now = Date.now();
+            // 🛡️ Deduplication: Don't re-log exact same error for same agent within 2 minutes (120,000 ms)
+            if (cleanText === lastLoggedSupabaseErrorText && currentAgentId === lastLoggedSupabaseErrorAgentId && (now - lastLoggedSupabaseErrorTime) < 120000) {
+                return;
+            }
+
+            lastLoggedSupabaseErrorText = cleanText;
+            lastLoggedSupabaseErrorAgentId = currentAgentId;
+            lastLoggedSupabaseErrorTime = now;
 
             console.warn('📡 [Supabase Observer] Syncing DOM error to Supabase for agent:', currentAgentId, 'Error:', cleanText);
 
@@ -182,6 +185,111 @@
     let accumulatedData = [];        // 🚀 Final data set
     let syncStartTime = null;        // 🚀 Timer tracking
     let isNameFetchComplete = false; // 🚀 Flag to delay sidebar cleanup
+
+    // 🗓️ Sequential Month-by-Month Extraction State
+    let sequentialMonthQueue = [];
+    let currentSequentialIndex = 0;
+    let isSequentialExtractionActive = false;
+    let sequentialFallbackRange = null;
+
+    const getCurrentMonthFallbackRange = () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        const formatDate = (date) => {
+            const dd = String(date.getDate()).padStart(2, '0');
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const yyyy = date.getFullYear();
+            return `${dd}/${mm}/${yyyy}`;
+        };
+        return {
+            startVal: formatDate(start),
+            endVal: formatDate(today)
+        };
+    };
+
+    const generateSequentialMonthRanges = (monthsCount = 3) => {
+        const today = new Date();
+        const ranges = [];
+        const formatDate = (date) => {
+            const dd = String(date.getDate()).padStart(2, '0');
+            const mm = String(date.getMonth() + 1).padStart(2, '0');
+            const yyyy = date.getFullYear();
+            return `${dd}/${mm}/${yyyy}`;
+        };
+
+        for (let i = monthsCount - 1; i >= 0; i--) {
+            const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            const start = new Date(d.getFullYear(), d.getMonth(), 1);
+            const end = (i === 0) ? today : new Date(d.getFullYear(), d.getMonth() + 1, 0);
+            ranges.push({
+                name: i === 0 ? 'Current Month' : `Month -${i}`,
+                startVal: formatDate(start),
+                endVal: formatDate(end)
+            });
+        }
+        return ranges;
+    };
+
+    const startSequentialMonthExtraction = (monthsCount = 3, fallbackStart, fallbackEnd) => {
+        const ranges = generateSequentialMonthRanges(monthsCount);
+        const cbFallback = getCurrentMonthFallbackRange();
+        const startFallback = fallbackStart || cbFallback.startVal;
+        const endFallback = fallbackEnd || cbFallback.endVal;
+
+        console.log(`📅 [Sequential Month Setup] ${ranges.length} Month ranges queued for background collection (Last ${monthsCount} months up to Current Month):`, ranges);
+        console.log(`🛡️ [Sequential Fallback Setup] Fallback set to Current Month (${startFallback} to ${endFallback})`);
+
+        sequentialMonthQueue = ranges;
+        currentSequentialIndex = 0;
+        isSequentialExtractionActive = true;
+        accumulatedData = []; // 🚀 Clear accumulated data in background memory at start of new 3-month cycle!
+        sequentialFallbackRange = { startVal: startFallback, endVal: endFallback };
+        runNextSequentialMonthStep();
+    };
+
+    const runNextSequentialMonthStep = () => {
+        // 🧹 Clean up previous live modal so extractRenewalTableData guard is clear
+        const oldLiveModal = document.getElementById('liveExtractModal');
+        if (oldLiveModal) oldLiveModal.remove();
+
+        if (!isSequentialExtractionActive || currentSequentialIndex >= sequentialMonthQueue.length) {
+            console.log('✅ [Sequential Extraction] All month steps completed extraction into background memory.');
+            isSequentialExtractionActive = false;
+            return false;
+        }
+
+        const currentRange = sequentialMonthQueue[currentSequentialIndex];
+        console.log(`🚀 [Sequential Extraction] Step ${currentSequentialIndex + 1}/${sequentialMonthQueue.length} (${currentRange.name}): ${currentRange.startVal} to ${currentRange.endVal}`);
+
+        const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
+        const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
+
+        if (fromInput && toInput) {
+            fromInput.value = currentRange.startVal;
+            fromInput.dispatchEvent(new Event('input', { bubbles: true }));
+            fromInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+            toInput.value = currentRange.endVal;
+            toInput.dispatchEvent(new Event('input', { bubbles: true }));
+            toInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        chrome.storage.local.set({
+            filterStartDate: currentRange.startVal,
+            filterEndDate: currentRange.endVal
+        });
+
+        const proposalBtn = document.querySelector('.button.view_proposals_btn');
+        proposalBtn?.click();
+
+        console.log(`⏳ [Sequential Month Extraction] Date filter applied (${currentRange.startVal} to ${currentRange.endVal}). Waiting 6 seconds for Faveo page load...`);
+
+        setTimeout(() => {
+            extractRenewalTableData();
+        }, 6000);
+
+        return true;
+    };
 
     const stopAllExtensionProcesses = () => {
         console.warn('🛑 stopAllExtensionProcesses CALLED! Deactivating global state.');
@@ -1410,6 +1518,9 @@
     const popup = document.getElementById('my-dashboard-popup');
     if (!popup) return console.log('Popup element not found.');
   
+    // 🧹 Remove any existing messageDiv elements to prevent duplicate Payment Summary cards
+    document.querySelectorAll('#messageDiv').forEach(el => el.remove());
+
     const dataUi = createDataUiContainer();
     const blockUi = createBlockUi();
     const messageDiv = createMessageDiv();
@@ -2647,6 +2758,15 @@ const createCustomMonthActionUI = (monthsBack) => {
         const endVal = formatDate(today);
         console.log(`🔍 Intent: Applying filter [${startVal}] to [${endVal}]`);
 
+        if (monthsBack >= 1) {
+            console.log(`📅 Triggering Sequential ${monthsBack}-Month Extraction...`);
+            setTimeout(() => {
+                spinner.remove();
+                startSequentialMonthExtraction(monthsBack, startVal, endVal);
+            }, 2000);
+            return;
+        }
+
         const proposalBtn = document.querySelector('.button.view_proposals_btn');
         proposalBtn?.click();
 
@@ -2801,21 +2921,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             chrome.storage.local.set({ filterStartDate: startVal, filterEndDate: endVal });
         }
 
-        // 4. Start Extraction
+        // 4. Start 3-Month Sequential Month-by-Month Extraction
         setTimeout(() => {
             spinner.remove();
-            
-            // Read fresh values right before extraction
-            const currentFrom = document.getElementById('from_date')?.value?.trim() || document.querySelector('input[id*="from_date"]')?.value?.trim();
-            const currentTo = document.getElementById('to_date')?.value?.trim() || document.querySelector('input[id*="to_date"]')?.value?.trim();
-            if (currentFrom || currentTo) {
-                chrome.storage.local.set({
-                    filterStartDate: currentFrom || startVal,
-                    filterEndDate: currentTo || endVal
-                });
-            }
-            
-            extractRenewalTableData();
+            const curFallback = getCurrentMonthFallbackRange();
+            startSequentialMonthExtraction(3, curFallback.startVal, curFallback.endVal);
         }, 1500);
 
     }, 6000); // 🚀 Wait 6 seconds for initial table/page load before filling dates
@@ -2861,8 +2971,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       const maxRetries = 40; // 🚀 Wait up to 20 seconds
 
       const startExtractionWithWait = () => {
-        // ⏳ Bypassing retries only if Faveo portal loading spinner is physically visible
-        // BUT: Once autopilot state machine is in START_EXTRACTION, do NOT pause for spinner
+        // ⏳ Pause retries whenever Faveo portal loading spinner is physically visible
         const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
         const isLoaderVisible = faveoLoader && (
             faveoLoader.offsetWidth > 0 || 
@@ -2870,10 +2979,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             window.getComputedStyle(faveoLoader).display !== 'none'
         );
 
-        // Only pause for spinner if extraction hasn't started yet (autopilotState != 'START_EXTRACTION')
-        const shouldPauseForSpinner = typeof autopilotState !== 'undefined' && autopilotState === 'START_EXTRACTION' ? false : true;
-        if (isLoaderVisible && shouldPauseForSpinner) {
-            console.log('⏳ Faveo page loading spinner is visible. Pausing extraction retries...');
+        if (isLoaderVisible) {
+            console.log('⏳ Faveo page loading spinner is visible. Pausing extraction until page load finishes...');
             setTimeout(startExtractionWithWait, 1000);
             return;
         }
@@ -2952,43 +3059,52 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             return;
           }
           console.log('Renewal table data not found / "No Data Found" text present.');
+
+          // 🔄 If sequential month extraction is active, proceed to next month in queue!
+          if (isSequentialExtractionActive) {
+              const oldLiveModal = document.getElementById('liveExtractModal');
+              if (oldLiveModal) oldLiveModal.remove();
+
+              currentSequentialIndex++;
+              if (currentSequentialIndex < sequentialMonthQueue.length) {
+                  console.log(`ℹ️ [Sequential Month Extraction] Month step ${currentSequentialIndex} (${sequentialMonthQueue[currentSequentialIndex - 1]?.name}) returned 'No Data Found'. Moving to next month step (${sequentialMonthQueue[currentSequentialIndex].name})...`);
+                  setTimeout(() => {
+                      runNextSequentialMonthStep();
+                  }, 2000);
+                  return;
+              } else {
+                  console.log(`🏁 [Sequential Month Extraction] All month steps completed.`);
+                  isSequentialExtractionActive = false;
+                  finishExtractionSuccess();
+                  return;
+              }
+          }
+
           if (!isGamePlaying) removeExtractionOverlay();
           const liveModal = document.getElementById('liveExtractModal');
           if (liveModal) liveModal.remove();
 
           chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_account_attempts', 'autopilot_index', 'autopilot_agents'], (res) => {
               if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused) {
-                  const currentAttempts = res.autopilot_account_attempts || 0;
-                  if (currentAttempts < 2) {
-                      const nextAttempt = currentAttempts + 1;
-                      console.log(`🤖 Autopilot: 'No Data Found' on attempt ${currentAttempts + 1}. Attempting ${nextAttempt} month(s) prior record...`);
-                      chrome.storage.local.set({
-                          autopilot_account_attempts: nextAttempt,
-                          autopilot_last_active_time: Date.now()
-                      }, () => {
+                  console.log('🤖 Autopilot: No data / table found on all attempted months ("No Data Found"). Logging out & logging in to next account...');
+                  const agents = res.autopilot_agents || [];
+                  const nextIndex = (res.autopilot_index + 1) % (agents.length || 1);
+                  const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
+                  chrome.storage.local.set({
+                      autopilot_index: nextIndex,
+                      autopilot_account_attempts: 0,
+                      autopilot_last_active_time: Date.now(),
+                      autopilot_next_login_time: Date.now() + delayMs
+                  }, () => {
+                      const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
+                      if (logoutBtn) {
+                          logoutBtn.click();
+                          console.log(`🤖 Autopilot: Logged out after 'No Data Found' attempt. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
+                      } else {
+                          window.location.hash = '#/auth/login';
                           window.location.reload();
-                      });
-                  } else {
-                      console.log('🤖 Autopilot: No data / table found on all 3 attempted months ("No Data Found"). Logging out & logging in to next account...');
-                      const agents = res.autopilot_agents || [];
-                      const nextIndex = (res.autopilot_index + 1) % (agents.length || 1);
-                      const delayMs = (nextIndex === 0) ? (10 * 60 * 1000) : (2 * 60 * 1000);
-                      chrome.storage.local.set({
-                          autopilot_index: nextIndex,
-                          autopilot_account_attempts: 0,
-                          autopilot_last_active_time: Date.now(),
-                          autopilot_next_login_time: Date.now() + delayMs
-                      }, () => {
-                          const logoutBtn = document.querySelector('li.logout a') || document.querySelector('.logout a') || [...document.querySelectorAll('a')].find(a => a.textContent.toLowerCase().includes('log out') || a.textContent.toLowerCase().includes('logout'));
-                          if (logoutBtn) {
-                              logoutBtn.click();
-                              console.log(`🤖 Autopilot: Logged out after 3 'No Data Found' attempts. Next agent index ${nextIndex} in ${delayMs / 60000} minutes.`);
-                          } else {
-                              window.location.hash = '#/auth/login';
-                              window.location.reload();
-                          }
-                      });
-                  }
+                      }
+                  });
               }
           });
           return;
@@ -3007,7 +3123,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         console.log(`📑 Headers Extracted: ${headers.join(', ')}`);
 
         // --- SUB-FUNCTIONS ---
-        const extractTableData = () => {
+        function extractTableData() {
             try {
                 const currentTable = document.querySelector('.proposalDetails-tbl');
                 if (!currentTable) {
@@ -3052,13 +3168,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             } catch (err) {
                 console.error('%c❌ [CRITICAL] %cError inside extractTableData:', "color:red; font-weight:bold;", "color:#e67e22; font-weight:bold;", err);
             }
-        };
+        }
 
-        const finishExtractionSuccess = () => {
-            console.log(`🎉 Success: Finished extracting all pages. Total leads: ${tableData.length}`);
+        function finishExtractionSuccess() {
+            console.log(`🎉 Success: Finished extracting current month batch. Total leads in batch: ${tableData.length}`);
             isExtractionPhaseDone = true;
-
-            if (!isGamePlaying) removeExtractionOverlay();
 
             const copiedData = JSON.parse(JSON.stringify(tableData));
             copiedData.forEach(row => {
@@ -3066,12 +3180,30 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
               if (!isDuplicate) accumulatedData.push(row);
             });
             
-            processData(accumulatedData);
-            
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                chrome.storage.local.set({ lastExtractedPages: currentPageNum });
             }
-            
+
+            // 🔄 SEQUENTIAL MONTH EXTRACTION CONTINUATION: Collect ALL data in memory first
+            if (isSequentialExtractionActive) {
+                currentSequentialIndex++;
+                if (currentSequentialIndex < sequentialMonthQueue.length) {
+                    console.log(`🚀 [Sequential Month Extraction] Step ${currentSequentialIndex}/${sequentialMonthQueue.length} done (${tableData.length} rows). Accumulated background memory total: ${accumulatedData.length}. Moving to next month step (${sequentialMonthQueue[currentSequentialIndex].name})...`);
+                    setTimeout(() => {
+                        runNextSequentialMonthStep();
+                    }, 2000);
+                    return; // ✋ Stop here! Do not render summary popup UI or upload yet. Keep collecting next month!
+                } else {
+                    console.log(`🏁 [Sequential Month Extraction] All ${sequentialMonthQueue.length} month steps finished! Collected ${accumulatedData.length} total leads across all months into background memory.`);
+                    isSequentialExtractionActive = false;
+                }
+            }
+
+            // 🚀 ALL MONTHS EXTRACTED INTO BACKGROUND MEMORY! NOW PROCESS & RENDER POPUP SUMMARY UI
+            processData(accumulatedData);
+
+            if (!isGamePlaying) removeExtractionOverlay();
+
             const liveModal = document.getElementById('liveExtractModal');
             if (liveModal) {
                liveModal.id = 'completedExtractModal';
@@ -3079,10 +3211,10 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                liveModal.style.borderColor = '#c5e1a3';
                liveModal.innerHTML = `
                   <div style="display:flex; align-items:center; justify-content:center; gap:10px; padding:2px 5px; font-family:sans-serif;">
-                      <div style="font-size:13px; color:#e67e22; font-weight:bold; font-weight:bold; display:flex; gap:8px;">
+                      <div style="font-size:13px; color:#e67e22; font-weight:bold; display:flex; gap:8px;">
                          <span>Page: <span style="color:#1565c0;">${currentPageNum}</span></span>
                          <span style="opacity:0.3;">|</span>
-                         <span>Lead: <span style="color:#d32f2f;">${accumulatedData.length}</span></span>
+                         <span>Total Leads: <span style="color:#d32f2f;">${accumulatedData.length}</span></span>
                       </div>
                       <button id="clearExtDataBtn" title="Clear All Data" style="background:none; border:none; cursor:pointer; color:#d32f2f; font-size:16px; padding:2px; display:flex; align-items:center;">
                         <i class="fi fi-rr-trash"></i>
@@ -3109,8 +3241,6 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             }
 
             let messageDiv = document.getElementById('messageDiv');
-            if (!messageDiv) createDataUi();
-    
             const secondaryButtonContainer = createSecondaryButtonContainer();
             if (secondaryButtonContainer) {
                 const popup = document.getElementById('my-dashboard-popup');
@@ -3122,16 +3252,16 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 document.querySelectorAll('.spinner, #loader-spinner').forEach(el => el.remove());
             }, 1000);
 
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
-                const autopilotActive = res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused;
-                if (isAutoSyncRunning || autopilotActive) {
-                    console.log('⚡ Autopilot/AutoSync: Extraction complete. Starting automatic API upload in 10s...');
-                    setTimeout(() => { sendDataToAppScript(); }, 10000);
-                }
-            });
-        };
+            // 🚀 ALL MONTHS EXTRACTED INTO BACKGROUND MEMORY! NOW TRANSMIT TO SUPABASE
+            if (accumulatedData && accumulatedData.length > 0) {
+                console.log(`⚡ All months collected in background memory (${accumulatedData.length} records). Transmitting complete batch to Supabase API...`);
+                sendDataToSupabase();
+            } else {
+                console.warn('⚠️ All month extractions complete, but 0 total records were found.');
+            }
+        }
 
-        const pauseExtractionWithError = (msg, page) => {
+        function pauseExtractionWithError(msg, page) {
             console.error(`❌ Error: ${msg} (Page ${page})`);
             chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], (res) => {
                 const isMasterMode = res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused;
@@ -3230,8 +3360,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         buttonContainer.style.display = 'none';
       }
 
-      if (!tableData || tableData.length === 0) {
-        console.warn('No table data to send.');
+      const payloadData = (accumulatedData && accumulatedData.length > 0) ? accumulatedData : tableData;
+      if (!payloadData || payloadData.length === 0) {
+        console.warn('No data (accumulated or table) to send.');
         return;
       }
 
@@ -3259,7 +3390,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     
       // Give the DOM some time to paint
       setTimeout(() => {
-        updateProgress(0, 0, accumulatedData.length);  // Start from 0%
+        updateProgress(0, 0, payloadData.length);  // Start from 0%
       }, 100);
     
       // 📦 Verify context validity before sending
@@ -3276,11 +3407,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       }
 
       try {
-          console.log(`📡 Sending ${accumulatedData.length} records to background for Supabase API upload...`);
+          console.log(`📡 Sending ${payloadData.length} records to background for Supabase API upload...`);
           // Send data to background
           chrome.runtime.sendMessage({
             type: 'TABLE_DATA',
-            payload: accumulatedData
+            payload: payloadData
           });
       } catch (e) {
           console.error('Failed to send message:', e);
@@ -3340,6 +3471,29 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
       } else if (message.type === 'UPLOAD_ERROR') {
         console.error(`%c❌ [UPLOAD ERROR] %cBackground Failed: %c${message.payload.error}`, "color:red; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:red;");
+
+        // 🛡️ Fallback: If sequential extraction fails, trigger Current Month fallback range
+        if (isSequentialExtractionActive && sequentialFallbackRange) {
+            console.warn(`⚠️ [Sequential Extraction] Step error. Executing Fallback Current Month Filter: ${sequentialFallbackRange.startVal} to ${sequentialFallbackRange.endVal}`);
+            isSequentialExtractionActive = false;
+
+            const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
+            const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
+            if (fromInput && toInput) {
+                fromInput.value = sequentialFallbackRange.startVal;
+                toInput.value = sequentialFallbackRange.endVal;
+            }
+            chrome.storage.local.set({
+                filterStartDate: sequentialFallbackRange.startVal,
+                filterEndDate: sequentialFallbackRange.endVal
+            });
+            const proposalBtn = document.querySelector('.button.view_proposals_btn');
+            proposalBtn?.click();
+
+            setTimeout(() => { extractRenewalTableData(); }, 3500);
+            return;
+        }
+
         isAutoSyncRunning = false; // 🚀 Reset UI state on error
         handleUploadErrorUI(message.payload);
         updateMinimizedStatus(); // 🔄 Reset UI
@@ -3364,7 +3518,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
       } else if (message.type === 'UPLOAD_COMPLETE') {
         const p = message.payload;
-        console.log(`%c🏆 [COMPLETE] %cBackground confirmed final transmission.`, "color:#f1c40f; font-weight:bold; font-size:12px;", "color:#e67e22; font-weight:bold;");
+        console.log(`%c🏆 [COMPLETE] %cBackground confirmed final transmission of all collected data across months.`, "color:#f1c40f; font-weight:bold; font-size:12px;", "color:#e67e22; font-weight:bold;");
+
+        isSequentialExtractionActive = false;
         isAutoSyncRunning = false; // 🚀 Finished! Reset for next run
         isExtractionPhaseDone = true;
         updateProgress(100, p.total, p.total, 0, null, null, null, null, 10, p.preChecked);
@@ -7328,8 +7484,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 createExtractionOverlay();
                 const url = window.location.href;
                 
-                // Skip if we are on login/reset pages
-                if (url.includes('#auth/login') || url.includes('#/auth/resetpwd')) return;
+                // Skip if we are on login/reset/verifyotp/changepwd pages
+                if (url.includes('#auth/login') || url.includes('auth/resetpwd') || url.includes('auth/verifyotp') || url.includes('auth/changepwd')) return;
                 
                 // 1. If on dashboard, navigate to proposals page (10s delay)
                 if (url.includes('/portal/dashboard')) {
@@ -7386,52 +7542,21 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                     else if (autopilotState === 'WAIT_5S_DELAY') {
                         const elapsed = Date.now() - autopilot5sTimer;
                         if (elapsed >= 10000) {
-                            const attempts = res.autopilot_account_attempts || 0;
-                            const monthsToFilter = attempts >= 2 ? 2 : (attempts === 1 ? 1 : 0); // Attempt 0: Current Month (0-Month), Attempt 1: 1-Month Back, Attempt 2: 2-Months Back
-                            console.log(`🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering ${monthsToFilter === 0 ? 'Current Month' : monthsToFilter + '-Month Back'} filter (Attempt ${attempts + 1}/3)...`);
-                            autopilotState = 'TRIGGER_2M_FILTER';
-                            autopilotFilterTriggerTime = Date.now();
-                            // Guard: only trigger filter ONCE
+                            console.log('🤖 Autopilot State: [WAIT_10S_DELAY] 10s delay passed. Triggering 3-Month Month-by-Month Extraction...');
+                            autopilotState = 'START_EXTRACTION';
                             if (!autopilotFilterTriggered && popup && !customUI && !liveModal && !completedModal && !isAutoSyncRunning) {
                                 autopilotFilterTriggered = true;
-                                handleCustomMonthClick(popup, monthsToFilter);
-                                console.log(`🤖 Autopilot: handleCustomMonthClick(${monthsToFilter}) triggered (Attempt ${attempts + 1}/3).`);
+                                const curFallback = getCurrentMonthFallbackRange();
+                                startSequentialMonthExtraction(3, curFallback.startVal, curFallback.endVal);
+                                console.log('🤖 Autopilot: startSequentialMonthExtraction(3) triggered.');
                             }
                         } else {
                             console.log('🤖 Autopilot State: [WAIT_10S_DELAY] Delaying (' + Math.round((10000 - elapsed) / 1000) + 's left)...');
                         }
                     }
-                    // === STATE: TRIGGER_2M_FILTER ===
-                    else if (autopilotState === 'TRIGGER_2M_FILTER') {
-                        const filterElapsed = Date.now() - autopilotFilterTriggerTime;
-                        if (isMainLoaderVisible) {
-                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Loading started. Transition to WAIT_2M_LOAD.');
-                            autopilotState = 'WAIT_2M_LOAD';
-                        } else if (filterElapsed >= 10000) {
-                            // Fallback: If spinner never appeared after 10 seconds (small dataset), go directly to extraction
-                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Spinner never appeared (10s timeout). Starting extraction in 10s...');
-                            autopilotState = 'START_EXTRACTION';
-                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
-                            setTimeout(() => { extractRenewalTableData(); }, 10000);
-                        } else {
-                            console.log('🤖 Autopilot State: [TRIGGER_2M_FILTER] Waiting for spinner to show... (' + Math.round(filterElapsed / 1000) + 's)');
-                        }
-                    }
-                    // === STATE: WAIT_2M_LOAD ===
-                    else if (autopilotState === 'WAIT_2M_LOAD') {
-                        if (!isMainLoaderVisible) {
-                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner gone. Starting extraction in 10s...');
-                            autopilotState = 'START_EXTRACTION';
-                            chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
-                            setTimeout(() => { extractRenewalTableData(); }, 10000);
-                        } else {
-                            // ⏳ Do NOT refresh last_active while spinner is active, so 3-min hard timeout measures exact load time from filter click!
-                            console.log('🤖 Autopilot State: [WAIT_2M_LOAD] Spinner active. Waiting for load to finish (Max 3m)...');
-                        }
-                    }
                     // === STATE: START_EXTRACTION (terminal - extraction is running) ===
                     else if (autopilotState === 'START_EXTRACTION') {
-                        // Do nothing - extraction is in progress, managed by extractRenewalTableData
+                        // Do nothing - extraction is in progress, managed by extractRenewalTableData / sequential steps
                         chrome.storage.local.set({ autopilot_last_active_time: Date.now() });
                     }
                 }

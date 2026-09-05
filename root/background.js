@@ -1,4 +1,8 @@
 // 📝 [PERSISTENT DAILY LOG SYSTEM]
+let bgLastLoggedSupabaseErrorText = '';
+let bgLastLoggedSupabaseErrorAgentId = '';
+let bgLastLoggedSupabaseErrorTime = 0;
+
 function getFormattedTimestamp() {
   const now = new Date();
   const YYYY = now.getFullYear();
@@ -590,11 +594,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   else if (message.type === 'LOG_SUPABASE_ERROR') {
     const errorMsg = message.payload?.error_message || '';
+    const agentId = message.payload?.agent_id || '';
     const lowerMsg = errorMsg.toLowerCase();
     if (lowerMsg.includes('important update') || lowerMsg.includes('announcement') || lowerMsg.includes('faveo plus app') || lowerMsg.includes('new update') || lowerMsg.includes('whats new') || lowerMsg.includes("what's new")) {
       sendResponse({ success: true, ignored: true });
       return true;
     }
+
+    const now = Date.now();
+    if (errorMsg === bgLastLoggedSupabaseErrorText && agentId === bgLastLoggedSupabaseErrorAgentId && (now - bgLastLoggedSupabaseErrorTime) < 120000) {
+      console.log('🛡️ [Supabase Log] Duplicate error ignored in background (logged within 2 mins).');
+      sendResponse({ success: true, ignored: true });
+      return true;
+    }
+
+    bgLastLoggedSupabaseErrorText = errorMsg;
+    bgLastLoggedSupabaseErrorAgentId = agentId;
+    bgLastLoggedSupabaseErrorTime = now;
 
     const SUPABASE_LOGS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/faveo_logs';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
@@ -638,32 +654,77 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   else if (message.type === 'FETCH_AGENTS') {
-    chrome.storage.local.get(['favExtId'], function (res) {
-      const extId = res.favExtId || '';
-      const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=forlogin&extId=' + extId;
-      fetch(APPS_SCRIPT_URL)
-        .then(res => res.json())
-        .then(agents => sendResponse({ success: true, agents }))
-        .catch(err => sendResponse({ success: false, error: err.message }));
-    });
+    const SUPABASE_AGENTS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/agent_codes?select=agent_id,agent_name,agent_password,agent_otp_finder';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    fetch(SUPABASE_AGENTS_URL, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    })
+      .then(res => res.json())
+      .then(agents => {
+        if (Array.isArray(agents)) {
+          sendResponse({ success: true, agents });
+        } else {
+          sendResponse({ success: false, error: 'Failed to fetch agents from Supabase' });
+        }
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'UPDATE_PASSWORD') {
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=update_password';
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(message.payload)
+    const userId = message.payload ? (message.payload.userId || message.payload.agent_id) : null;
+    const newPassword = message.payload ? (message.payload.newPassword || message.payload.password) : null;
+    if (!userId || !newPassword) {
+      sendResponse({ success: false, error: 'Missing userId or newPassword' });
+      return true;
+    }
+    const SUPABASE_UPDATE_URL = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/agent_codes?agent_id=eq.${encodeURIComponent(userId)}`;
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    
+    fetch(SUPABASE_UPDATE_URL, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({
+        agent_password: newPassword,
+        updated_at: new Date().toISOString()
+      })
     })
-      .then(res => res.json())
-      .then(data => sendResponse(data))
+      .then(res => {
+        if (res.ok) {
+          sendResponse({ success: true, status: 'success', result: 'success' });
+        } else {
+          res.text().then(txt => sendResponse({ success: false, error: txt }));
+        }
+      })
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'GET_ALL_USERS') {
-    fetch(`${APPS_SCRIPT_URL}?action=get_all_users`)
-      .then(response => response.json())
-      .then(data => sendResponse(data))
+    const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?select=*';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    fetch(SUPABASE_URL, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          sendResponse({ success: true, users: data });
+        } else {
+          sendResponse({ success: false, message: 'Failed to fetch users from Supabase' });
+        }
+      })
       .catch(error => sendResponse({ success: false, message: error.message }));
     return true; // Keep channel open
   }
@@ -688,27 +749,290 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   else if (message.type === 'REGISTER_USER') {
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=register_user';
-    fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(message.payload)
+    const extId = String(message.payload ? message.payload.extId : '').trim();
+    const name = String(message.payload ? message.payload.name : '').trim();
+    const email = String(message.payload ? message.payload.email : '').trim();
+    
+    const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    fetch(`${SUPABASE_URL}?extension_id=eq.${encodeURIComponent(extId)}`, {
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     })
       .then(res => res.json())
-      .then(data => sendResponse(data))
+      .then(rows => {
+        if (Array.isArray(rows) && rows.length > 0) {
+          sendResponse({ success: true, message: 'User already exists' });
+        } else {
+          const generate9CharId = () => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let result = '';
+            for (let i = 0; i < 9; i++) {
+              result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+          };
+
+          fetch(SUPABASE_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+              id: generate9CharId(),
+              extension_id: extId,
+              user_name: name,
+              user_email: email,
+              status: 'Pending',
+              is_admin: false,
+              profile_visible: false,
+              renewal_visible: false,
+              otp_required: false,
+              digital_discount: false,
+              emi_option: false,
+              created_at: new Date().toISOString()
+            })
+          })
+            .then(res => res.json())
+            .then(data => sendResponse({ success: true, data }))
+            .catch(err => sendResponse({ success: false, error: err.message }));
+        }
+      })
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'CHECK_AUTH') {
-    const timestamp = Date.now();
-    let url = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=check_auth&extId=' + message.payload.extId + '&t=' + timestamp;
-    if (message.payload.email) url += '&email=' + encodeURIComponent(message.payload.email);
-    fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message, message: 'Network / Connection Error. Please try again.' }));
+    const extId = String(message.payload ? message.payload.extId : '').replace(/,/g, '').trim();
+    const userEmailInput = (message.payload && message.payload.email && String(message.payload.email).trim() !== '') 
+      ? String(message.payload.email).trim().toLowerCase() 
+      : null;
+
+    console.log(`🔍 [CHECK AUTH] === START AUTH CHECK ===`);
+    console.log(`🔍 [CHECK AUTH] Input Extension ID: "${extId}"`);
+    console.log(`🔍 [CHECK AUTH] Input Email: "${userEmailInput}"`);
+
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?select=*';
+
+    fetch(SUPABASE_URL, {
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    })
+      .then(res => {
+        console.log(`📡 [CHECK AUTH] Supabase Response HTTP Status: ${res.status} ${res.statusText}`);
+        return res.json();
+      })
+      .then(rows => {
+        console.log(`📊 [CHECK AUTH] Total User Rows Returned from Supabase:`, Array.isArray(rows) ? rows.length : rows);
+
+        if (!Array.isArray(rows)) {
+          console.error('❌ [CHECK AUTH] Supabase query returned non-array response:', rows);
+          sendResponse({ success: false, message: (rows && rows.message) ? rows.message : 'Database permission error' });
+          return;
+        }
+
+        if (rows.length === 0) {
+          console.warn('❌ [CHECK AUTH] ext_user_data table is empty');
+          sendResponse({ success: false, message: 'ID or Email mismatch' });
+          return;
+        }
+
+        let userRow = null;
+        let checkedRowsInfo = [];
+
+        for (let i = 0; i < rows.length; i++) {
+          let rowExtId = String(rows[i].extension_id || '').replace(/,/g, '').trim();
+          let rowEmail = String(rows[i].user_email || '').trim().toLowerCase();
+
+          const idMatch = (rowExtId === extId);
+          const emailMatch = (userEmailInput === null || userEmailInput === rowEmail);
+
+          checkedRowsInfo.push({
+            name: rows[i].user_name,
+            rowExtId,
+            rowEmail,
+            idMatch,
+            emailMatch,
+            matched: (idMatch && emailMatch)
+          });
+
+          if (idMatch && emailMatch) {
+            userRow = rows[i];
+            console.log(`✅ [CHECK AUTH] Matched User Record at index ${i}:`, {
+              id: userRow.id,
+              name: userRow.user_name,
+              email: userRow.user_email,
+              extension_id: userRow.extension_id,
+              status: userRow.status
+            });
+            break;
+          }
+        }
+
+        if (!userRow) {
+          console.warn('❌ [CHECK AUTH] No Matching User Record found! Iteration details:', checkedRowsInfo);
+          sendResponse({ success: false, message: 'ID or Email mismatch' });
+          return;
+        }
+
+        const status = (userRow.status || 'pending').trim().toLowerCase();
+
+        if (status === 'approved') {
+          const userName = userRow.user_name || 'User';
+          const rowEmailFinal = userRow.user_email || '';
+          const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+          let otpRequired = (userRow.otp_required === true || String(userRow.otp_required).toUpperCase() === 'TRUE');
+
+          let userData = {
+            id: userRow.id,
+            extension_id: userRow.extension_id,
+            user_name: userName,
+            user_email: rowEmailFinal,
+            status: status,
+            is_admin: (userRow.is_admin === true || String(userRow.is_admin).toUpperCase() === 'TRUE'),
+            profile_visible: (userRow.profile_visible === true || String(userRow.profile_visible).toUpperCase() === 'TRUE'),
+            renewal_visible: (userRow.renewal_visible === true || String(userRow.renewal_visible).toUpperCase() === 'TRUE'),
+            digital_discount: (userRow.digital_discount === true || String(userRow.digital_discount).toUpperCase() === 'TRUE'),
+            emi_option: (userRow.emi_option === true || String(userRow.emi_option).toUpperCase() === 'TRUE'),
+            agent_access: String(userRow.agent_access || ''),
+            otp_required: otpRequired
+          };
+
+          console.log(`📊 [SUPABASE DATA FETCHED] for User: ${userName} (${rowEmailFinal})`);
+          console.log(`➡️ Ext ID: ${userData.extension_id}, Status: ${userData.status}`);
+          console.log(`➡️ Admin: ${userData.is_admin}, Profile Visible: ${userData.profile_visible}`);
+          console.log(`➡️ Renewal Visible: ${userData.renewal_visible}, Digital Discount: ${userData.digital_discount}`);
+          console.log(`➡️ Agent Access: ${userData.agent_access}, OTP Req: ${userData.otp_required}`);
+
+          const updateUrl = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?id=eq.${encodeURIComponent(userRow.id)}`;
+          const nowStr = new Date().toLocaleString();
+
+          if (!otpRequired) {
+            console.log('⚡ [CHECK AUTH] OTP NOT REQUIRED. Authorizing immediately.');
+            fetch(updateUrl, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+              },
+              body: JSON.stringify({ last_login: nowStr })
+            }).catch(e => console.warn('Failed to update last_login:', e));
+
+            sendResponse({
+              success: true,
+              step: 'AUTHORIZED',
+              userData: userData,
+              is_admin: userData.is_admin,
+              profile_visible: userData.profile_visible,
+              renewal_visible: userData.renewal_visible,
+              digital_discount: userData.digital_discount,
+              emi_option: userData.emi_option
+            });
+          } else {
+            console.log(`🚀 [CHECK AUTH] OTP REQUIRED. Generating OTP ${otp} for ${rowEmailFinal}`);
+            
+            fetch(updateUrl, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+              },
+              body: JSON.stringify({ latest_otp: otp, last_login: nowStr })
+            }).catch(e => console.warn('Failed to update latest_otp:', e));
+
+            const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=check_auth&extId=' + extId + (userEmailInput ? '&email=' + encodeURIComponent(userEmailInput) : '');
+            fetch(APPS_SCRIPT_URL).catch(() => {});
+
+            sendResponse({
+              success: true,
+              step: 'OTP_SENT',
+              email: rowEmailFinal,
+              userData: userData,
+              is_admin: userData.is_admin,
+              profile_visible: userData.profile_visible,
+              renewal_visible: userData.renewal_visible,
+              digital_discount: userData.digital_discount,
+              emi_option: userData.emi_option
+            });
+          }
+        } else {
+          console.warn(`⏳ [CHECK AUTH] Status for user "${userRow.user_name}" is '${status}', not 'approved'`);
+          sendResponse({ success: false, status: 'pending', message: 'Waiting for Admin Approval' });
+        }
+      })
+      .catch(err => {
+        console.error('❌ [CHECK AUTH] Exception caught:', err);
+        sendResponse({ success: false, error: err.message, message: 'Network / Connection Error. Please try again.' });
+      });
     return true;
   }
   else if (message.type === 'VERIFY_USER_OTP') {
-    const url = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=verify_user_otp&extId=' + message.payload.extId + '&otp=' + message.payload.otp;
-    fetch(url).then(res => res.json()).then(data => sendResponse(data)).catch(err => sendResponse({ success: false, error: err.message }));
+    const extId = String(message.payload ? message.payload.extId : '').trim();
+    const otpInput = String(message.payload ? message.payload.otp : '').trim();
+
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+    const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?select=*';
+
+    fetch(SUPABASE_URL, {
+      method: 'GET',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    })
+      .then(res => res.json())
+      .then(rows => {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          sendResponse({ success: false, message: 'User not found' });
+          return;
+        }
+
+        const userRow = rows.find(r => {
+          const rowExtId = String(r.extension_id || '').replace(/,/g, '').trim();
+          return rowExtId === extId;
+        });
+
+        if (!userRow) {
+          sendResponse({ success: false, message: 'User not found' });
+          return;
+        }
+
+        const storedOtp = String(userRow.latest_otp || '').trim();
+
+        if (storedOtp && storedOtp === otpInput) {
+          const userData = {
+            id: userRow.id,
+            extension_id: userRow.extension_id || extId,
+            user_name: userRow.user_name || 'User',
+            user_email: userRow.user_email || '',
+            status: userRow.status,
+            is_admin: Boolean(userRow.is_admin),
+            profile_visible: Boolean(userRow.profile_visible),
+            renewal_visible: Boolean(userRow.renewal_visible),
+            digital_discount: Boolean(userRow.digital_discount),
+            emi_option: Boolean(userRow.emi_option),
+            agent_access: userRow.agent_access || '',
+            otp_required: Boolean(userRow.otp_required)
+          };
+
+          sendResponse({
+            success: true,
+            userData: userData,
+            is_admin: userData.is_admin,
+            profile_visible: userData.profile_visible,
+            renewal_visible: userData.renewal_visible,
+            digital_discount: userData.digital_discount,
+            emi_option: userData.emi_option
+          });
+        } else {
+          sendResponse({ success: false, message: 'Invalid OTP' });
+        }
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   else if (message.type === 'REOPEN_LOGIN_TAB') {
@@ -725,32 +1049,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'SET_MASTER_MODE') {
     const isMaster = message.payload.isMaster;
     if (isMaster) {
-      chrome.storage.local.get(['favExtId'], function(res) {
-        const extId = res.favExtId || '';
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=forlogin&extId=' + extId;
-        fetch(APPS_SCRIPT_URL)
-          .then(r => r.json())
-          .then(agents => {
-            chrome.storage.local.set({
-              is_master_extension: true,
-              is_autopilot_active: true,
-              autopilot_paused: false,
-              autopilot_index: 0,
-              autopilot_next_login_time: 0,
-              autopilot_agents: agents
-            }, function() {
-              chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-                if (tabs[0] && tabs[0].url && tabs[0].url.includes('faveo.careinsurance.com')) {
-                  chrome.tabs.update(tabs[0].id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
-                }
-              });
-              sendResponse({ success: true });
+      const SUPABASE_AGENTS_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/agent_codes?select=agent_id,agent_name,agent_password,agent_otp_finder';
+      const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+      fetch(SUPABASE_AGENTS_URL, {
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`
+        }
+      })
+        .then(r => r.json())
+        .then(agents => {
+          chrome.storage.local.set({
+            is_master_extension: true,
+            is_autopilot_active: true,
+            autopilot_paused: false,
+            autopilot_index: 0,
+            autopilot_next_login_time: 0,
+            autopilot_agents: Array.isArray(agents) ? agents : []
+          }, function() {
+            chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+              if (tabs[0] && tabs[0].url && tabs[0].url.includes('faveo.careinsurance.com')) {
+                chrome.tabs.update(tabs[0].id, { url: 'https://faveo.careinsurance.com/NewFaveo/#auth/login' });
+              }
             });
-          })
-          .catch(err => {
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: true });
           });
-      });
+        })
+        .catch(err => {
+          sendResponse({ success: false, error: err.message });
+        });
     } else {
       chrome.storage.local.set({
         is_master_extension: false,
