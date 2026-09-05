@@ -678,9 +678,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const userId = message.payload ? (message.payload.userId || message.payload.agent_id) : null;
     const newPassword = message.payload ? (message.payload.newPassword || message.payload.password) : null;
     if (!userId || !newPassword) {
+      console.warn('⚠️ [UPDATE_PASSWORD] Missing userId or newPassword in payload:', message.payload);
       sendResponse({ success: false, error: 'Missing userId or newPassword' });
       return true;
     }
+
+    console.log(`🔑 [UPDATE_PASSWORD] Syncing new password to Supabase agent_codes table for Agent ID: ${userId}...`);
     const SUPABASE_UPDATE_URL = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/agent_codes?agent_id=eq.${encodeURIComponent(userId)}`;
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
     
@@ -699,12 +702,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
       .then(res => {
         if (res.ok) {
+          console.log(`✅ [UPDATE_PASSWORD] Successfully updated password for agent ${userId} in Supabase agent_codes!`);
           sendResponse({ success: true, status: 'success', result: 'success' });
         } else {
-          res.text().then(txt => sendResponse({ success: false, error: txt }));
+          res.text().then(txt => {
+            console.error(`❌ [UPDATE_PASSWORD] Supabase update error for agent ${userId}:`, txt);
+            sendResponse({ success: false, error: txt });
+          });
         }
       })
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .catch(err => {
+        console.error(`❌ [UPDATE_PASSWORD] Fetch exception for agent ${userId}:`, err);
+        sendResponse({ success: false, error: err.message });
+      });
     return true;
   }
   else if (message.type === 'GET_ALL_USERS') {

@@ -196,15 +196,53 @@
             return false;
         }
 
-        return !!(document.getElementById('passwordOtp') || 
-                  document.querySelector('input[formcontrolname="otp"]') || 
-                  document.querySelector('.otp-group') ||
-                  isResetUrl);
+        var popup = document.getElementById('favLoginPopup');
+        var credentialsSubmitted = popup && popup.dataset && popup.dataset.credentialsSubmitted === 'true';
+
+        var hasExplicitOtpInput = !!(
+            document.querySelector('input[formcontrolname="otp"]') || 
+            document.querySelector('input[name="otp"]') ||
+            document.getElementById('verfy_otp_btn') ||
+            document.querySelector('.otp-group') ||
+            document.querySelector('#resend_otp_btn') ||
+            document.querySelector('.unlock a')
+        );
+
+        if (hasExplicitOtpInput || isResetUrl) return true;
+
+        // 🔍 Check input placeholders for OTP after credentials submission on #/auth/login
+        if (credentialsSubmitted) {
+            var inputs = document.querySelectorAll('input');
+            for (var i = 0; i < inputs.length; i++) {
+                var ph = (inputs[i].getAttribute('placeholder') || '').toLowerCase().trim();
+                var fcName = (inputs[i].getAttribute('formcontrolname') || '').toLowerCase().trim();
+                if (fcName === 'otp' || ph.includes('enter your password') || ph.includes('enter password') || ph.includes('enter otp') || ph.includes('otp')) {
+                    return true;
+                }
+            }
+
+            var buttons = document.querySelectorAll('button, a, input[type="submit"]');
+            for (var b = 0; b < buttons.length; b++) {
+                var btnTxt = (buttons[b].innerText || buttons[b].textContent || buttons[b].value || '').toLowerCase().trim();
+                if (btnTxt.includes('verify') || btnTxt.includes('resend otp') || btnTxt.includes('resend')) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     };
 
     var updateUIToOTPState = function(agent, list) {
+        if (!isPageInOtpState()) {
+            console.log('🚫 [favLogin] updateUIToOTPState skipped - Page is not in OTP verification/reset state.');
+            return;
+        }
         var statusMsg = document.getElementById('favLoginStatus');
-        if (statusMsg) statusMsg.innerText = 'Waiting for OTP...';
+        if (statusMsg) {
+            statusMsg.innerText = 'Waiting for OTP...';
+            statusMsg.style.color = '#4fc3f7';
+        }
         
         var loader = document.getElementById('favDancingDots');
         if (loader) loader.style.display = 'flex';
@@ -342,10 +380,27 @@
 
     var fetchAndFillOtp = function(agent, retryCount) {
         var popup = document.getElementById('favLoginPopup');
-        var isHandlingExpired = popup && popup.dataset && popup.dataset.handlingExpiredPwd === 'true';
+        var currentUrl = window.location.href.toLowerCase();
+        var isResetState = currentUrl.includes('resetpwd') || currentUrl.includes('verifyotp') || currentUrl.includes('changepwd');
+        var isHandlingExpired = !isResetState && popup && popup.dataset && popup.dataset.handlingExpiredPwd === 'true';
 
-        if (isHandlingExpired || !isPageInOtpState()) {
+        if (!isResetState && (isHandlingExpired || !isPageInOtpState())) {
             console.log('🚫 [favLogin] Skipping OTP fetch - Page is not in OTP verification/reset state or user is blocked.');
+            var statusMsg = document.getElementById('favLoginStatus');
+            var loader = document.getElementById('favDancingDots');
+            var bodyText = (document.body ? (document.body.innerText || document.body.textContent || '') : '').toLowerCase();
+            var isBlockedMsg = bodyText.includes('maximum login attempt') || bodyText.includes('userid is blocked') || bodyText.includes('user id is blocked') || bodyText.includes('reset your password') || bodyText.includes('password has expired') || bodyText.includes('kindly reset it') || bodyText.includes('user is blocked') || bodyText.includes('account is blocked');
+
+            if (isBlockedMsg) {
+                if (statusMsg) { statusMsg.innerText = 'USER BLOCKED - Resetting Password...'; statusMsg.style.color = '#ff9800'; }
+                if (loader) loader.style.display = 'flex';
+            } else {
+                if (loader) loader.style.display = 'none';
+                if (statusMsg && statusMsg.innerText.includes('Waiting for OTP')) {
+                    statusMsg.innerText = 'Sign in required';
+                    statusMsg.style.color = '#ffffff';
+                }
+            }
             return;
         }
         retryCount = retryCount || 0;
@@ -1640,6 +1695,8 @@
         };
 
         var startLoginCycle = function(agent, aName, aId, list) {
+            var popupInit = document.getElementById('favLoginPopup');
+            if (popupInit) popupInit.dataset.credentialsSubmitted = 'false';
             chrome.storage.local.set({ selectedAgentName: aName, selectedAgentId: aId, otp_resend_count: 0, last_filled_otp: '' });
             list.innerHTML = '';
             var activeCard = document.createElement('div');
@@ -1650,54 +1707,108 @@
             var statusMsg = document.createElement('div');
             statusMsg.id = 'favLoginStatus';
             statusMsg.style.cssText = 'color:rgba(255,255,255,0.6); font-size:12px; text-align:center; margin-top:20px;';
-            statusMsg.innerText = 'Please wait...';
+            statusMsg.innerText = 'Waiting 5s before filling credentials...';
             list.appendChild(statusMsg);
 
             var loader = document.createElement('div'); loader.id = 'favDancingDots'; loader.className = 'dancing-dots';
             loader.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
             list.appendChild(loader);
 
-            var userInput = document.getElementById('userId');
-            var passInput = document.getElementById('passwordOtp');
-            var loginBtn = document.getElementById('sign_in_btn');
-            if (userInput && passInput) {
+            // ⏱️ Wait 5 seconds before filling credentials and signing in
+            setTimeout(function() {
                 var passVal = getKey(agent, 'agent password') || getKey(agent, 'agent_password') || '';
-                
-                userInput.focus();
-                userInput.value = aId;
-                userInput.dispatchEvent(new Event('input', { bubbles: true }));
-                userInput.dispatchEvent(new Event('change', { bubbles: true }));
-                userInput.dispatchEvent(new Event('keyup', { bubbles: true }));
-                userInput.dispatchEvent(new Event('blur', { bubbles: true }));
 
-                passInput.focus();
-                passInput.value = passVal;
-                passInput.dispatchEvent(new Event('input', { bubbles: true }));
-                passInput.dispatchEvent(new Event('change', { bubbles: true }));
-                passInput.dispatchEvent(new Event('keyup', { bubbles: true }));
-                passInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                if (statusMsg) {
+                    statusMsg.innerText = 'Filling credentials...';
+                    statusMsg.style.color = '#4fc3f7';
+                }
 
-                setTimeout(function() { 
-                    if (loginBtn && loginBtn.isConnected) { 
-                        loginBtn.disabled = false; 
-                        loginBtn.removeAttribute('disabled');
-                        loginBtn.click(); 
-                    } 
-                }, 600);
-            }
+                var attemptCount = 0;
+                var maxAttempts = 10;
+
+                var fillAndVerify = function() {
+                    attemptCount++;
+                    var currentUserIdEl = document.getElementById('userId');
+                    var currentPassEl = document.getElementById('passwordOtp');
+                    var currentLoginBtn = document.getElementById('sign_in_btn');
+
+                    if (currentUserIdEl) {
+                        currentUserIdEl.focus();
+                        currentUserIdEl.value = aId;
+                        currentUserIdEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        currentUserIdEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        currentUserIdEl.dispatchEvent(new Event('keyup', { bubbles: true }));
+                        currentUserIdEl.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+
+                    if (currentPassEl) {
+                        currentPassEl.focus();
+                        currentPassEl.value = passVal;
+                        currentPassEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        currentPassEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        currentPassEl.dispatchEvent(new Event('keyup', { bubbles: true }));
+                        currentPassEl.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+
+                    // 🔍 Verify that BOTH fields are non-empty and hold values
+                    var isUserFilled = currentUserIdEl && currentUserIdEl.value && currentUserIdEl.value.trim().length > 0;
+                    var isPassFilled = currentPassEl && currentPassEl.value && currentPassEl.value.trim().length > 0;
+
+                    if (isUserFilled && isPassFilled) {
+                        console.log('✅ Credentials verified filled! User:', currentUserIdEl.value, 'Pass length:', currentPassEl.value.length, 'Submitting...');
+                        if (statusMsg) {
+                            statusMsg.innerText = 'Credentials verified. Signing in...';
+                            statusMsg.style.color = '#4caf50';
+                        }
+
+                        setTimeout(function() {
+                            // Double-check one more time before clicking sign in button
+                            var finalUserVal = currentUserIdEl ? currentUserIdEl.value : '';
+                            var finalPassVal = currentPassEl ? currentPassEl.value : '';
+
+                            if (finalUserVal && finalPassVal && currentLoginBtn && currentLoginBtn.isConnected) {
+                                currentLoginBtn.disabled = false;
+                                currentLoginBtn.removeAttribute('disabled');
+                                var popupEl = document.getElementById('favLoginPopup');
+                                if (popupEl) popupEl.dataset.credentialsSubmitted = 'true';
+                                currentLoginBtn.click();
+                            } else if (attemptCount < maxAttempts) {
+                                console.warn('⚠️ Credentials cleared right before click! Retrying fill (attempt ' + attemptCount + ')...');
+                                setTimeout(fillAndVerify, 400);
+                            }
+                        }, 500);
+                    } else {
+                        if (attemptCount < maxAttempts) {
+                            console.warn('⚠️ Credentials field empty after fill attempt ' + attemptCount + '. Retrying in 400ms...');
+                            setTimeout(fillAndVerify, 400);
+                        } else {
+                            console.error('❌ Failed to fill credentials after max attempts.');
+                            if (statusMsg) {
+                                statusMsg.innerText = 'ERROR - Failed to fill login fields';
+                                statusMsg.style.color = '#ff5252';
+                            }
+                        }
+                    }
+                };
+
+                fillAndVerify();
+            }, 5000);
+
             startPageObserver(agent, list);
         };
 
         var startPageObserver = function(agent, list) {
             var observer = new MutationObserver(function() {
-                var successMsg = document.querySelector('.success-message');
                 var resendBtn = document.querySelector('.unlock a');
+                var isOtpInputPresent = !!(document.querySelector('input[formcontrolname="otp"]') || document.querySelector('input[name="otp"]') || document.getElementById('verfy_otp_btn'));
                 
                 var allErrors = document.querySelectorAll('.error-message.text-center, .error-message, div.alert-danger, div.text-danger');
                 var foundError = false;
+                var handledBlockedError = false;
 
                 allErrors.forEach(function(el) {
-                    var txt = el.innerText;
+                    if (handledBlockedError) return;
+                    var txt = el.innerText || el.textContent || '';
                     var statusMsg = document.getElementById('favLoginStatus');
                     var loader = document.getElementById('favDancingDots');
 
@@ -1707,13 +1818,14 @@
                         foundError = true;
                     } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it') || txt.toLowerCase().includes('maximum login attempt') || txt.toLowerCase().includes('userid is blocked') || txt.toLowerCase().includes('user id is blocked') || txt.toLowerCase().includes('reset your password') || txt.toLowerCase().includes('user is blocked') || txt.toLowerCase().includes('account is blocked')) {
                         var popupEl = document.getElementById('favLoginPopup');
+                        handledBlockedError = true;
+                        try { observer.disconnect(); } catch(e) {}
+
                         if (popupEl && popupEl.dataset && popupEl.dataset.handlingExpiredPwd === 'true') return;
                         if (popupEl) popupEl.dataset.handlingExpiredPwd = 'true';
-                        try { observer.disconnect(); } catch(e) {}
 
                         if (statusMsg) { statusMsg.innerText = 'USER BLOCKED - Resetting Password...'; statusMsg.style.color = '#ff9800'; }
                         if (loader) loader.style.display = 'flex';
-                        foundError = false; // 🛑 Password Reset flow is active - do NOT trigger Autopilot error handler!
 
                         var agentName = agent ? (getKey(agent, 'agent name') || getKey(agent, 'agent_name')) : 'Agent';
                         var agentId = agent ? (getKey(agent, 'agent id') || getKey(agent, 'agent_id')) : '';
@@ -1739,7 +1851,7 @@
                             }, function() {
                                 setTimeout(function() {
                                     window.location.hash = '#/auth/resetpwd';
-                                }, 500);
+                                }, 3000);
                             });
                         });
                     } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count')) {
@@ -1754,19 +1866,18 @@
                     } else if (txt.toLowerCase().includes('please enter valid otp') || txt.toLowerCase().includes('valid otp') || txt.toLowerCase().includes('invalid otp') || txt.toLowerCase().includes('conflict with recovery') || txt.toLowerCase().includes('replica disconnect')) {
                         observer.disconnect();
                         handleInvalidOtpError(agent, statusMsg, loader);
+                        handledBlockedError = true;
                         return;
                     } else if (txt.includes('Something went wrong') || txt.includes('please try again')) {
                         if (statusMsg) { statusMsg.innerText = 'ERROR - Reloading...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                        // 🔄 Force reload page on server error too
                         console.log('⚠️ Something went wrong detected! Force reloading page in 2 seconds...');
                         setTimeout(function() { window.location.reload(); }, 2000);
                     } else if (txt.includes('connection has been closed')) {
                         if (statusMsg) { statusMsg.innerText = 'CONNECTION CLOSED - Skipping...'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                        // 🔄 Force reload + skip agent on connection closed
                         console.log('⚠️ Connection closed detected! Reloading and skipping agent...');
                         chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_agents'], function(r) {
                             if (r.is_master_extension && r.is_autopilot_active && !r.autopilot_paused && r.autopilot_agents) {
@@ -1786,6 +1897,10 @@
                     }
                 });
 
+                if (handledBlockedError) {
+                    return;
+                }
+
                 if (foundError) {
                     observer.disconnect();
                     chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused'], function(res) {
@@ -1796,8 +1911,9 @@
                     return;
                 }
 
-                if (successMsg || (resendBtn && resendBtn.innerText.includes('Resend OTP'))) {
-                    updateUIToOTPState(agent, list); observer.disconnect();
+                if (isOtpInputPresent || (resendBtn && resendBtn.innerText.includes('Resend OTP'))) {
+                    updateUIToOTPState(agent, list); 
+                    observer.disconnect();
                 }
             });
             observer.observe(document.body, { childList: true, subtree: true });
@@ -1854,54 +1970,59 @@
             var isAlreadyFetching = popup && popup.dataset && popup.dataset.otpFetchStarted === 'true';
 
             if (isOtpPage && !isAlreadyFetching) {
-                console.log('✅ [favLogin] Reset/Verify OTP State Detected! Starting OTP Fetch...');
-                if (popup) popup.dataset.otpFetchStarted = 'true';
+                console.log('✅ [favLogin] Reset/Verify OTP State Detected! Waiting 3s before starting OTP fetch...');
+                if (popup) {
+                    popup.dataset.otpFetchStarted = 'true';
+                    popup.dataset.handlingExpiredPwd = 'false'; // 🔓 Clear expired pwd flag so OTP fetch is not blocked!
+                }
                 
-                chrome.storage.local.get(['favPendingResetAgent', 'favPendingResetId'], function(res) {
-                    var agent = res.favPendingResetAgent;
-                    var agentId = res.favPendingResetId;
+                setTimeout(function() {
+                    chrome.storage.local.get(['favPendingResetAgent', 'favPendingResetId'], function(res) {
+                        var agent = res.favPendingResetAgent;
+                        var agentId = res.favPendingResetId;
 
-                    var startFetchForAgent = function(targetAgent) {
-                        if (!targetAgent) return;
-                        var listContainer = document.getElementById('agentListContainer');
-                        if (listContainer) {
-                             listContainer.innerHTML = ''; 
-                             var activeCard = document.createElement('div');
-                             activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
-                             var aName = getKey(targetAgent, 'agent name') || getKey(targetAgent, 'agent_name') || 'Agent';
-                             var aId = getKey(targetAgent, 'agent id') || getKey(targetAgent, 'agent_id') || agentId || '--';
-                             activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>';
-                             listContainer.appendChild(activeCard);
+                        var startFetchForAgent = function(targetAgent) {
+                            if (!targetAgent) return;
+                            var listContainer = document.getElementById('agentListContainer');
+                            if (listContainer) {
+                                 listContainer.innerHTML = ''; 
+                                 var activeCard = document.createElement('div');
+                                 activeCard.className = 'agent-card'; activeCard.style.borderColor = '#4caf50';
+                                 var aName = getKey(targetAgent, 'agent name') || getKey(targetAgent, 'agent_name') || 'Agent';
+                                 var aId = getKey(targetAgent, 'agent id') || getKey(targetAgent, 'agent_id') || agentId || '--';
+                                 activeCard.innerHTML = '<div class="agent-icon-box" style="background:#4caf50;"><i class="fi flex fi-rr-user"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:600;">' + aName + '</div><div style="font-size:10px; opacity:0.5;">ID: ' + aId + '</div></div>';
+                                 listContainer.appendChild(activeCard);
 
-                             var statusMsg = document.createElement('div');
-                             statusMsg.id = 'favLoginStatus';
-                             statusMsg.style.cssText = 'color:rgba(255,255,255,0.6); font-size:12px; text-align:center; margin-top:15px;';
-                             statusMsg.innerText = 'Resetting Password. Waiting for OTP...';
-                             listContainer.appendChild(statusMsg);
+                                 var statusMsg = document.createElement('div');
+                                 statusMsg.id = 'favLoginStatus';
+                                 statusMsg.style.cssText = 'color:rgba(255,255,255,0.6); font-size:12px; text-align:center; margin-top:15px;';
+                                 statusMsg.innerText = 'Resetting Password. Waiting for OTP...';
+                                 listContainer.appendChild(statusMsg);
 
-                             var loader = document.createElement('div');
-                             loader.id = 'favDancingDots';
-                             loader.className = 'dancing-dots';
-                             loader.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-                             listContainer.appendChild(loader);
+                                 var loader = document.createElement('div');
+                                 loader.id = 'favDancingDots';
+                                 loader.className = 'dancing-dots';
+                                 loader.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+                                 listContainer.appendChild(loader);
 
-                             updateUIToOTPState(targetAgent, listContainer);
-                        }
-                        fetchAndFillOtp(targetAgent, 0);
-                    };
-
-                    if (agent) {
-                        startFetchForAgent(agent);
-                    } else {
-                        chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
-                            if (response && response.success && response.agents && response.agents.length > 0) {
-                                var found = agentId ? response.agents.find(function(a) { return (getKey(a, 'agent id') || getKey(a, 'agent_id')) == agentId; }) : null;
-                                var target = found || response.agents[0];
-                                startFetchForAgent(target);
+                                 updateUIToOTPState(targetAgent, listContainer);
                             }
-                        });
-                    }
-                });
+                            fetchAndFillOtp(targetAgent, 0);
+                        };
+
+                        if (agent) {
+                            startFetchForAgent(agent);
+                        } else {
+                            chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
+                                if (response && response.success && response.agents && response.agents.length > 0) {
+                                    var found = agentId ? response.agents.find(function(a) { return (getKey(a, 'agent id') || getKey(a, 'agent_id')) == agentId; }) : null;
+                                    var target = found || response.agents[0];
+                                    startFetchForAgent(target);
+                                }
+                            });
+                        }
+                    });
+                }, 3000);
             }
         }
 
@@ -1973,7 +2094,7 @@
                         }, function() {
                             setTimeout(function() {
                                 window.location.hash = '#/auth/resetpwd';
-                            }, 500);
+                            }, 3000);
                         });
                     });
                 }
@@ -2031,8 +2152,8 @@
                         listContainer.innerHTML = '<div style="color:#ff9800; padding:20px 10px; font-size:13px; text-align:center; font-weight:600; animation: favSlideDown 0.3s ease;">Password changed! Syncing with Supabase...</div>';
                     }
 
-                    chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword'], function(res) {
-                        var rId = res.favPendingResetId;
+                    chrome.storage.local.get(['favPendingResetId', 'favPendingResetNewPassword', 'selectedAgentId'], function(res) {
+                        var rId = res.favPendingResetId || res.selectedAgentId;
                         var rPass = res.favPendingResetNewPassword;
 
                         if (rId && rPass) {
@@ -2144,7 +2265,7 @@
                                         cpwdBtn.removeAttribute('disabled');
                                         cpwdBtn.click();
                                     }
-                                }, 800);
+                                }, 3000);
                             });
                         }
                     };
@@ -2210,7 +2331,7 @@
                                             try { parentForm.submit(); } catch(e) {}
                                         }
                                     }
-                                }, 800);
+                                }, 3000);
                             }
                         }, 500);
 
