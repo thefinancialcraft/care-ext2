@@ -264,7 +264,10 @@
         const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
         const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
 
+        console.log(`🔍 [DEBUG] Date inputs found - From: ${fromInput ? 'YES' : 'NO'}, To: ${toInput ? 'YES' : 'NO'}`);
+        
         if (fromInput && toInput) {
+            console.log(`🔍 [DEBUG] Before setting - From: "${fromInput.value}", To: "${toInput.value}"`);
             fromInput.value = currentRange.startVal;
             fromInput.dispatchEvent(new Event('input', { bubbles: true }));
             fromInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -272,6 +275,8 @@
             toInput.value = currentRange.endVal;
             toInput.dispatchEvent(new Event('input', { bubbles: true }));
             toInput.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            console.log(`🔍 [DEBUG] After setting - From: "${fromInput.value}", To: "${toInput.value}"`);
         }
 
         chrome.storage.local.set({
@@ -280,11 +285,21 @@
         });
 
         const proposalBtn = document.querySelector('.button.view_proposals_btn');
+        console.log(`🔍 [DEBUG] Proposal button found: ${proposalBtn ? 'YES' : 'NO'}`);
         proposalBtn?.click();
 
         console.log(`⏳ [Sequential Month Extraction] Date filter applied (${currentRange.startVal} to ${currentRange.endVal}). Waiting 6 seconds for Faveo page load...`);
 
         setTimeout(() => {
+            // Debug: Check what data is on the page before extraction
+            const table = document.querySelector('.proposalDetails-tbl');
+            if (table) {
+                const rows = table.querySelectorAll('tbody tr');
+                console.log(`🔍 [DEBUG] Before extraction - Table has ${rows.length} rows`);
+                if (rows.length > 0) {
+                    console.log(`🔍 [DEBUG] First row before extraction: "${rows[0].textContent.trim().substring(0, 100)}..."`);
+                }
+            }
             extractRenewalTableData();
         }, 6000);
 
@@ -2950,6 +2965,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       // Save exact date filter inputs from DOM
       const domFrom = document.getElementById('from_date')?.value?.trim();
       const domTo = document.getElementById('to_date')?.value?.trim();
+      
+      console.log(`🔍 [DEBUG] Current date filter in DOM - From: "${domFrom}", To: "${domTo}"`);
+      
       if (domFrom || domTo) {
           chrome.storage.local.set({
               filterStartDate: domFrom || null,
@@ -3112,13 +3130,64 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
         console.log(`✅ Table and ${rows.length} rows found!`);
         
+        // Debug: Check if the data matches the expected date range
+        if (rows.length > 0) {
+            const firstRowCells = rows[0].querySelectorAll('td');
+            console.log(`🔍 [DEBUG] First row analysis - ${firstRowCells.length} cells:`);
+            firstRowCells.forEach((cell, idx) => {
+                const text = cell.textContent.trim();
+                console.log(`  Cell ${idx}: "${text}"`);
+                // Check if this looks like a date (contains - or /)
+                if (text.match(/\d{2}[-/]\d{2}[-/]\d{4}/) || text.match(/\d{4}[-/]\d{2}[-/]\d{2}/)) {
+                    console.log(`    ⚠️ This looks like a date!`);
+                }
+            });
+            console.log(`🔍 [DEBUG] Expected date range: From "${domFrom}" To "${domTo}"`);
+        }
+        
         tableData = []; // clear previous
         const headerElements = table.querySelectorAll('thead tr th');
         let headers = [];
-        headerElements.forEach(header => {
+        
+        // Handle multi-line headers by combining them properly
+        headerElements.forEach((header, idx) => {
             let key = header.textContent.trim().toUpperCase().replace(/\s+/g, '_');
-            if (key !== 'ACTION') headers.push(key);
+            if (key !== 'ACTION') {
+                headers.push(key);
+                console.log(`🔍 [DEBUG] Header ${idx}: "${header.textContent.trim()}" -> "${key}"`);
+            }
         });
+        
+        // Check if we have the expected headers based on the table structure
+        console.log(`🔍 [DEBUG] Total headers found: ${headers.length}`);
+        
+        // For the specific Faveo table structure, we expect these headers:
+        // PROPOSAL_NO., CUSTOMER_NAME, PAYMENT_AMOUNT, GWP, LOGIN_DATE, PROPOSAL_STATUS, POLICY_NO., POLICY_START_DATE, NO._OF_LIVES, BUSINESS_TYPE, PLAN
+        
+        // If headers seem incorrect, try alternative extraction
+        if (headers.length < 5) {
+            console.warn('⚠️ Headers count seems too low, attempting alternative header extraction...');
+            const allHeaderRows = table.querySelectorAll('thead tr');
+            headers = [];
+            allHeaderRows.forEach((tr, rowIdx) => {
+                const ths = tr.querySelectorAll('th');
+                ths.forEach((th, colIdx) => {
+                    const text = th.textContent.trim().toUpperCase().replace(/\s+/g, '_');
+                    if (text !== 'ACTION' && text !== '') {
+                        // If this column already exists, append to it
+                        if (headers[colIdx]) {
+                            headers[colIdx] += '_' + text;
+                        } else {
+                            headers[colIdx] = text;
+                        }
+                    }
+                });
+            });
+            // Filter out empty headers
+            headers = headers.filter(h => h && h !== 'ACTION');
+            console.log(`🔍 [DEBUG] Alternative headers: ${headers.join(', ')}`);
+        }
+        
         headers.push('AGENT_NAME');
         console.log(`📑 Headers Extracted: ${headers.join(', ')}`);
 
@@ -3136,22 +3205,105 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
                 console.groupCollapsed(`%c📡 [SCAN] %cPage ${currentPageNum} | %c${currentRows.length} rows found`, "color:#0065b3; font-weight:bold;", "color:#e67e22; font-weight:bold;", "color:#0065b3; font-weight:bold;");
                 console.log(`---------------------------------------------------------`);
                 if (headers.length === 0) console.warn('⚠️ WARNING: Headers array is empty!');
+                
+                // Log all rows for debugging
+                console.log(`🔍 [DEBUG] Total tbody rows found: ${currentRows.length}`);
+                currentRows.forEach((row, idx) => {
+                    console.log(`  Row ${idx}: "${row.textContent.trim().substring(0, 50)}..."`);
+                });
 
                 currentRows.forEach((row, rIdx) => {
+                    // Skip rows that don't have actual data (Angular comment elements)
+                    const rowText = row.textContent.trim();
+                    if (!rowText || rowText.length < 5) {
+                        console.log(`⏭️ Skipping empty row ${rIdx}`);
+                        return;
+                    }
+                    
                     const cells = row.querySelectorAll('td');
+                    
+                    // Skip rows that don't have the expected number of cells
+                    if (cells.length < 5) {
+                        console.log(`⏭️ Skipping row ${rIdx} with only ${cells.length} cells`);
+                        return;
+                    }
+                    
                     const rowData = {};
                     let cellCounter = 0;
+                    
+                    // Debug: Log first row structure
+                    if (rIdx === 0) {
+                        console.log(`🔍 [DEBUG] First row has ${cells.length} cells, headers count: ${headers.length}`);
+                        cells.forEach((cell, idx) => {
+                            console.log(`  Cell ${idx}: "${cell.textContent.trim()}"`);
+                        });
+                    }
+                    
                     cells.forEach((cell) => {
                         if (headers[cellCounter]) {
-                            rowData[headers[cellCounter]] = cell.textContent.trim();
+                            // Clean up multi-line content - take first meaningful line
+                            let cellText = cell.textContent.trim();
+                            // Replace newlines and extra spaces with single space
+                            cellText = cellText.replace(/\s+/g, ' ').trim();
+                            
+                            // For the status column, extract meaningful text BEFORE general cleaning
+                            if (headers[cellCounter] === 'PROPOSAL_STATUS') {
+                                console.log(`🔍 [DEBUG] PROPOSAL_STATUS processing - Raw textContent: "${cell.textContent.trim()}"`);
+                                console.log(`🔍 [DEBUG] PROPOSAL_STATUS cell HTML: "${cell.innerHTML}"`);
+                                
+                                // Special handling for nested h5 elements - ensure we get all text
+                                const h5Elements = cell.querySelectorAll('h5');
+                                console.log(`🔍 [DEBUG] Found ${h5Elements.length} h5 elements`);
+                                
+                                if (h5Elements.length > 0) {
+                                    const h5Text = Array.from(h5Elements).map(h5 => h5.textContent.trim()).join(' ');
+                                    console.log(`🔍 [DEBUG] PROPOSAL_STATUS from h5 elements: "${h5Text}"`);
+                                    // Use h5 text if it's more complete than cell.textContent
+                                    if (h5Text.length > cellText.length) {
+                                        cellText = h5Text;
+                                    }
+                                }
+                                
+                                // Try alternative extraction using child nodes
+                                if (cellText === '' || cellText.length < 3) {
+                                    const allText = Array.from(cell.childNodes)
+                                        .map(node => node.textContent?.trim() || '')
+                                        .filter(text => text.length > 0)
+                                        .join(' ');
+                                    console.log(`🔍 [DEBUG] PROPOSAL_STATUS from childNodes: "${allText}"`);
+                                    if (allText.length > cellText.length) {
+                                        cellText = allText;
+                                    }
+                                }
+                                
+                                console.log(`🔍 [DEBUG] PROPOSAL_STATUS final value: "${cellText}"`);
+                                
+                                // Final check for empty status
+                                if (cellText === '' || cellText === null) {
+                                    console.warn(`⚠️ PROPOSAL_STATUS is empty for row ${rIdx}`);
+                                }
+                            } else {
+                                // For other columns, remove common artifacts
+                                cellText = cellText.replace(/^Primary:\s*/i, '').replace(/Payment Entry Task\s*/i, '').replace(/\s*-\s*$/, '').trim();
+                            }
+                            
+                            rowData[headers[cellCounter]] = cellText;
                             cellCounter++;
                         }
                     });
-                    const linkEl = row.querySelector('a');
-                    rowData['PAYMENT_LINK'] = linkEl ? linkEl.href : '';
+                    
+                    // Get the payment link from the first cell (proposal number)
+                    const firstCellLink = cells[0]?.querySelector('a');
+                    rowData['PAYMENT_LINK'] = firstCellLink ? firstCellLink.href : '';
+                    
                     rowData['AGENT_NAME'] = agentName;
                     rowData['isUploaded'] = false;
                     tableData.push(rowData);
+                    
+                    // Debug: Log first row extracted data
+                    if (rIdx === 0) {
+                        console.log(`🔍 [DEBUG] First row extracted data:`, rowData);
+                    }
                 });
 
                 // Update UI
@@ -3408,6 +3560,11 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
       try {
           console.log(`📡 Sending ${payloadData.length} records to background for Supabase API upload...`);
+          
+          // 📊 Log all leads being sent to database in JSON format
+          console.log(`📊 [DATABASE UPLOAD] Complete payload in JSON format:`);
+          console.log(JSON.stringify(payloadData, null, 2));
+          
           // Send data to background
           chrome.runtime.sendMessage({
             type: 'TABLE_DATA',

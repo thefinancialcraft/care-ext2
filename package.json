@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/thefinancialcraft/care-ext2#readme",
   "dependencies": {
-    "javascript-obfuscator": "^5.5.0"
+    "javascript-obfuscator": "^5.8.0"
   },
   "description": ""
 }

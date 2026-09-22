@@ -165,6 +165,131 @@
 
     setupDomErrorObserver();
 
+    // 🛡️ [INSTANT OBSERVER FOR "PASSWORD RESET NOTIFICATION" MODAL]
+    function setupPasswordResetNotificationObserver() {
+        if (window._pwdResetNotificationObserverActive) return;
+        window._pwdResetNotificationObserverActive = true;
+
+        var checkModal = function() {
+            var popup = document.getElementById('favLoginPopup');
+            var isAlreadyHandling = (popup && popup.dataset && popup.dataset.handlingPwdResetNotice === 'true') || window._handlingPwdResetNotice;
+            if (isAlreadyHandling) return;
+
+            var allModals = document.querySelectorAll('div.modal-content, div.feedback_modal_content, div.modal, div.feedback_heding_close_container, .feedback_poup_heding_text, div.modal-body');
+            var foundModal = null;
+            var resetBtnToClick = null;
+
+            for (var i = 0; i < allModals.length; i++) {
+                var txt = (allModals[i].innerText || allModals[i].textContent || '').toLowerCase();
+                if (txt.includes('password reset notification') || txt.includes('password will expire') || txt.includes('do you want to reset your password')) {
+                    foundModal = allModals[i].closest('.modal-content') || allModals[i].closest('.modal-dialog') || allModals[i];
+                    break;
+                }
+            }
+
+            if (!foundModal) {
+                var bodyTxt = (document.body ? (document.body.innerText || document.body.textContent || '') : '').toLowerCase();
+                if (bodyTxt.includes('password reset notification') && bodyTxt.includes('reset your password')) {
+                    foundModal = document.body;
+                }
+            }
+
+            if (foundModal) {
+                var buttons = foundModal.querySelectorAll('button, a.btn, input[type="button"], input[type="submit"]');
+                for (var b = 0; b < buttons.length; b++) {
+                    var btnTxt = (buttons[b].innerText || buttons[b].textContent || '').toLowerCase().trim();
+                    if (btnTxt === 'reset password' || (btnTxt.includes('reset password') && !btnTxt.includes('proceed'))) {
+                        resetBtnToClick = buttons[b];
+                        break;
+                    }
+                }
+
+                if (!resetBtnToClick) {
+                    var allBtns = document.querySelectorAll('.modal-footer button, button.btn-success, button');
+                    for (var k = 0; k < allBtns.length; k++) {
+                        var t = (allBtns[k].innerText || allBtns[k].textContent || '').toLowerCase().trim();
+                        if (t === 'reset password') {
+                            resetBtnToClick = allBtns[k];
+                            break;
+                        }
+                    }
+                }
+
+                window._handlingPwdResetNotice = true;
+                if (popup) popup.dataset.handlingPwdResetNotice = 'true';
+
+                console.warn('🚨 [favLogin Observer] "Password Reset Notification" modal detected! Auto-clicking "Reset Password" & starting password reset flow...');
+
+                var statusMsg = document.getElementById('favLoginStatus');
+                var loader = document.getElementById('favDancingDots');
+                if (statusMsg) { statusMsg.innerText = 'PASSWORD EXPIRED NOTICE - Resetting Password...'; statusMsg.style.color = '#ff9800'; }
+                if (loader) { loader.style.display = 'flex'; }
+
+                chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], function(res) {
+                    var agentId = res.selectedAgentId;
+                    var agentName = res.selectedAgentName || 'Agent';
+                    var targetAgent = null;
+
+                    if (res.autopilot_agents && res.autopilot_agents.length > 0) {
+                        if (agentId) {
+                            targetAgent = res.autopilot_agents.find(function(a) { 
+                                return (getKey(a, 'agent id') || getKey(a, 'agent_id')) == agentId; 
+                            });
+                        }
+                        if (!targetAgent) {
+                            var idx = res.autopilot_index || 0;
+                            targetAgent = res.autopilot_agents[idx % res.autopilot_agents.length];
+                        }
+                    }
+
+                    var finalId = agentId || (targetAgent ? (getKey(targetAgent, 'agent id') || getKey(targetAgent, 'agent_id')) : '');
+                    var finalName = agentName || (targetAgent ? (getKey(targetAgent, 'agent name') || getKey(targetAgent, 'agent_name')) : 'Agent');
+
+                    chrome.storage.local.set({ 
+                        favPendingResetId: finalId, 
+                        favPendingResetAgent: targetAgent, 
+                        favPendingResetName: finalName 
+                    }, function() {
+                        if (resetBtnToClick && resetBtnToClick.isConnected) {
+                            console.log('🏁 [favLogin Observer] Auto-clicking "Reset Password" button on DOM modal:', resetBtnToClick);
+                            try {
+                                resetBtnToClick.disabled = false;
+                                resetBtnToClick.removeAttribute('disabled');
+                                resetBtnToClick.click();
+                            } catch(e) {
+                                console.error('Error clicking modal reset password button:', e);
+                            }
+                        }
+
+                        setTimeout(function() {
+                            if (!window.location.hash.includes('resetpwd') && !window.location.hash.includes('verifyotp') && !window.location.hash.includes('changepwd')) {
+                                console.log('🔄 [favLogin Observer] Navigating to #/auth/resetpwd...');
+                                window.location.hash = '#/auth/resetpwd';
+                            }
+                        }, 1500);
+                    });
+                });
+            }
+        };
+
+        var observer = new MutationObserver(function() {
+            checkModal();
+        });
+
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (document.body) observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+            });
+        }
+
+        setInterval(checkModal, 500);
+        checkModal();
+    }
+
+    setupPasswordResetNotificationObserver();
+
     var getKey = function(obj, pattern) {
         if (!obj) return null;
         var lowerPattern = pattern.toLowerCase();
@@ -1816,7 +1941,7 @@
                         if (statusMsg) { statusMsg.innerText = 'FILL CORRECT DETAILS'; statusMsg.style.color = '#ff5252'; }
                         if (loader) loader.style.display = 'none';
                         foundError = true;
-                    } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it') || txt.toLowerCase().includes('maximum login attempt') || txt.toLowerCase().includes('userid is blocked') || txt.toLowerCase().includes('user id is blocked') || txt.toLowerCase().includes('reset your password') || txt.toLowerCase().includes('user is blocked') || txt.toLowerCase().includes('account is blocked')) {
+                    } else if (txt.toLowerCase().includes('password has expired') || txt.toLowerCase().includes('kindly reset it') || txt.toLowerCase().includes('maximum login attempt') || txt.toLowerCase().includes('userid is blocked') || txt.toLowerCase().includes('user id is blocked') || txt.toLowerCase().includes('reset your password') || txt.toLowerCase().includes('user is blocked') || txt.toLowerCase().includes('account is blocked') || txt.toLowerCase().includes('password reset notification') || txt.toLowerCase().includes('password will expire')) {
                         var popupEl = document.getElementById('favLoginPopup');
                         handledBlockedError = true;
                         try { observer.disconnect(); } catch(e) {}
@@ -1830,7 +1955,17 @@
                         var agentName = agent ? (getKey(agent, 'agent name') || getKey(agent, 'agent_name')) : 'Agent';
                         var agentId = agent ? (getKey(agent, 'agent id') || getKey(agent, 'agent_id')) : '';
 
-                        console.warn('⚠️ [favLogin] "UserId is blocked / Reset Password" error detected for agent in Master/Normal Mode! Disconnecting observer & triggering Reset Password...');
+                        console.warn('⚠️ [favLogin] "UserId is blocked / Reset Password Notification" error detected! Disconnecting observer & triggering Reset Password...');
+
+                        // Try clicking Reset Password button on modal if present
+                        var modalResetBtns = document.querySelectorAll('.modal-footer button, .feedback_modal_content button, button.btn-success, button');
+                        for (var rb = 0; rb < modalResetBtns.length; rb++) {
+                            var rbt = (modalResetBtns[rb].innerText || modalResetBtns[rb].textContent || '').toLowerCase().trim();
+                            if (rbt === 'reset password') {
+                                try { modalResetBtns[rb].click(); } catch(e) {}
+                                break;
+                            }
+                        }
 
                         chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], function(res) {
                             var finalId = agentId || res.selectedAgentId;
@@ -1850,8 +1985,10 @@
                                 favPendingResetName: finalName 
                             }, function() {
                                 setTimeout(function() {
-                                    window.location.hash = '#/auth/resetpwd';
-                                }, 3000);
+                                    if (!window.location.hash.includes('resetpwd') && !window.location.hash.includes('verifyotp')) {
+                                        window.location.hash = '#/auth/resetpwd';
+                                    }
+                                }, 2000);
                             });
                         });
                     } else if (txt.includes('maximum OTP generation count limit') || txt.includes('reached maximum OTP') || txt.includes('maximum otp count')) {
@@ -2051,11 +2188,11 @@
                 }
             }
 
-            // 🚨 Broad DOM check for Blocked User / Password Expired / Maximum Login Attempt Limit errors (Master & Normal Mode)
+            // 🚨 Broad DOM check for Blocked User / Password Expired / Password Reset Notification / Maximum Login Attempt Limit errors (Master & Normal Mode)
             var isBlockedMsg = false;
             for (var b = 0; b < allElements.length; b++) {
                 var bText = (allElements[b].innerText || allElements[b].textContent || '').toLowerCase();
-                if (bText.includes('password has expired') || bText.includes('kindly reset it') || bText.includes('maximum login attempt') || bText.includes('userid is blocked') || bText.includes('user id is blocked') || bText.includes('reset your password') || bText.includes('user is blocked') || bText.includes('account is blocked')) {
+                if (bText.includes('password has expired') || bText.includes('kindly reset it') || bText.includes('maximum login attempt') || bText.includes('userid is blocked') || bText.includes('user id is blocked') || bText.includes('reset your password') || bText.includes('user is blocked') || bText.includes('account is blocked') || bText.includes('password reset notification') || bText.includes('password will expire')) {
                     isBlockedMsg = true;
                     break;
                 }
@@ -2065,7 +2202,17 @@
                 var isAlreadyHandlingExpired = popup && popup.dataset && popup.dataset.handlingExpiredPwd === 'true';
                 if (!isAlreadyHandlingExpired) {
                     if (popup) popup.dataset.handlingExpiredPwd = 'true';
-                    console.warn('🚨 [favLogin] "UserId is blocked / Reset Password" error detected on page (Master/Normal Mode)! Triggering Reset Password...');
+                    console.warn('🚨 [favLogin] "UserId is blocked / Reset Password Notification" detected on page! Triggering Reset Password...');
+
+                    // Try clicking Reset Password button on modal if present
+                    var modalResetBtns2 = document.querySelectorAll('.modal-footer button, .feedback_modal_content button, button.btn-success, button');
+                    for (var rb2 = 0; rb2 < modalResetBtns2.length; rb2++) {
+                        var rbt2 = (modalResetBtns2[rb2].innerText || modalResetBtns2[rb2].textContent || '').toLowerCase().trim();
+                        if (rbt2 === 'reset password') {
+                            try { modalResetBtns2[rb2].click(); } catch(e) {}
+                            break;
+                        }
+                    }
 
                     chrome.storage.local.get(['selectedAgentId', 'selectedAgentName', 'autopilot_agents', 'autopilot_index'], function(res) {
                         var agentId = res.selectedAgentId;
@@ -2093,8 +2240,10 @@
                             favPendingResetName: finalName 
                         }, function() {
                             setTimeout(function() {
-                                window.location.hash = '#/auth/resetpwd';
-                            }, 3000);
+                                if (!window.location.hash.includes('resetpwd') && !window.location.hash.includes('verifyotp')) {
+                                    window.location.hash = '#/auth/resetpwd';
+                                }
+                            }, 2000);
                         });
                     });
                 }
