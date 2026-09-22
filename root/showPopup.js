@@ -2586,8 +2586,9 @@ const createCustomMonthActionUI = (monthsBack) => {
     let isFetchingNameActive = false;
 
     const tryClickProfile = (nameSpan, spinner, buttonContainer) => {
-        // ONLY allow initiating agent name fetch on exact dashboard page!
-        if (!isExactDashboardPage() && !isFetchingNameActive) {
+        // 🛡️ STRICT: Agent name fetch ONLY initiates on exact dashboard URL
+        // If agent is on ANY other URL, always skip — no exceptions
+        if (!isExactDashboardPage()) {
             console.log('🛑 [showPopup] Not exact dashboard URL! Skipping agent name fetching.');
             chrome.storage.local.get(['selectedAgentName'], (res) => {
                 if (nameSpan) nameSpan.innerText = res?.selectedAgentName || 'Agent';
@@ -2596,18 +2597,37 @@ const createCustomMonthActionUI = (monthsBack) => {
                 updateMinimizedStatus();
                 removeInitialOverlay();
             });
-            // 🛡️ Redirect to Dashboard if on Profile page when fetch is inactive
-            if (window.location.href.includes('profile')) {
-                console.warn('⚠️ [showPopup] Stuck on Profile page while name fetch is inactive! Redirecting to Dashboard...');
-                const dashBtn = document.querySelector('.side_dash_navigation .dropdown11') || 
-                                document.querySelector('.side_dash_navigation a') || 
-                                [...document.querySelectorAll('a')].find(a => a.textContent.trim().toLowerCase() === 'dashboard');
-                if (dashBtn) dashBtn.click();
-                window.location.hash = '#/portal/dashboard';
-            }
             return;
         }
 
+        // 🛡️ SKIP: If agent name is already fetched and we're on dashboard, no need to re-fetch
+        if (!isFetchingNameActive) {
+            const skipCheck = new Promise((resolve) => {
+                chrome.storage.local.get(['selectedAgentName'], (res) => {
+                    resolve(res?.selectedAgentName || '');
+                });
+            });
+            skipCheck.then((existingName) => {
+                const lowerName = existingName.toLowerCase();
+                if (existingName && existingName !== 'Agent' && lowerName !== 'fetching name...' && !lowerName.includes('system')) {
+                    console.log('✅ [showPopup] Agent name already fetched ("' + existingName + '"). Skipping re-fetch on dashboard.');
+                    if (nameSpan) nameSpan.innerText = existingName;
+                    if (spinner) spinner.style.display = 'none';
+                    if (buttonContainer) buttonContainer.style.display = 'flex';
+                    updateMinimizedStatus();
+                    removeInitialOverlay();
+                    return;
+                }
+                // Name not valid — proceed with actual fetch
+                doFetchAgentName(nameSpan, spinner, buttonContainer);
+            });
+            return;
+        }
+
+    };
+
+    // 🔄 Actual agent name fetching logic (only called from dashboard when name not cached)
+    const doFetchAgentName = (nameSpan, spinner, buttonContainer) => {
         isFetchingNameActive = true;
         let attempts = 0;
         const maxAttempts = 5;
@@ -7412,7 +7432,9 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
 
       // 2. Main Dashboard vs Proposal Summary Popup
       const currentUrl = window.location.href;
-      const isProposalPage = currentUrl.includes('proposalGuid=') || currentUrl.includes('portability') || currentUrl.includes('portSummary');
+      const hashPath = (currentUrl.split('#')[1] || '').split('?')[0].replace(/\/+$/, '').toLowerCase();
+      const isProposalPage = hashPath === '/portal/portability/portabilitysummary' || 
+                             hashPath === '/portal/portability/portsummary';
 
       if (isProposalPage) {
           const oldDashPopup = document.getElementById('my-dashboard-popup');
