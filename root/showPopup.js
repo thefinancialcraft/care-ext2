@@ -668,6 +668,45 @@
         autoPilotBtn.onmouseover = () => autoPilotBtn.style.transform = 'scale(1.2) rotate(15deg)';
         autoPilotBtn.onmouseout = () => autoPilotBtn.style.transform = 'scale(1) rotate(0deg)';
 
+        const currentDateSyncBtn = document.createElement('button');
+        currentDateSyncBtn.id = 'miniCurrentDateSyncBtn';
+        currentDateSyncBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 32 32" style="pointer-events:none; filter: drop-shadow(0 2px 4px rgba(126, 34, 206, 0.6));">
+            <defs>
+                <linearGradient id="purpleCalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#c084fc"/>
+                    <stop offset="50%" stop-color="#9333ea"/>
+                    <stop offset="100%" stop-color="#6b21a8"/>
+                </linearGradient>
+            </defs>
+            <!-- Solid Purple Calendar Base -->
+            <rect x="3" y="6" width="26" height="23" rx="5" fill="url(#purpleCalGrad)"/>
+            <!-- Top Dark Purple Header Bar -->
+            <path d="M3 11C3 8.23858 5.23858 6 8 6H24C26.7614 6 29 8.23858 29 11V12H3V11Z" fill="#581c87"/>
+            <!-- Shiny White Binder Rings -->
+            <rect x="8" y="2.5" width="3" height="6" rx="1.5" fill="#ffffff"/>
+            <rect x="21" y="2.5" width="3" height="6" rx="1.5" fill="#ffffff"/>
+            <!-- Calendar Crisp White Inner Page -->
+            <rect x="6" y="14" width="20" height="12" rx="3" fill="#ffffff"/>
+            <!-- Current Date Purple Indicator Badge -->
+            <circle cx="16" cy="20" r="4" fill="#9333ea"/>
+            <circle cx="16" cy="20" r="1.8" fill="#ffffff"/>
+        </svg>`;
+        Object.assign(currentDateSyncBtn.style, {
+            display: 'flex', // 🚀 Default Visible
+            background: 'transparent', border: 'none', color: '#c084fc', 
+            fontSize: '16px', cursor: 'pointer', padding: '4px', borderRadius: '50%',
+            width: '28px', height: '28px', alignItems: 'center', justifyContent: 'center',
+            transition: 'transform 0.2s', filter: 'drop-shadow(0 0 6px rgba(192, 132, 252, 0.7))'
+        });
+        currentDateSyncBtn.title = 'Extract Current Date Proposals (Table)';
+        currentDateSyncBtn.onclick = (e) => {
+            e.stopPropagation();
+            currentDateSyncBtn.style.display = 'none'; // 🚀 Hide once clicked
+            handleCurrentDateClick();
+        };
+        currentDateSyncBtn.onmouseover = () => currentDateSyncBtn.style.transform = 'scale(1.2) rotate(15deg)';
+        currentDateSyncBtn.onmouseout = () => currentDateSyncBtn.style.transform = 'scale(1) rotate(0deg)';
+
         const expandBtn = document.createElement('button');
         expandBtn.id = 'miniExpandBtn';
         expandBtn.innerHTML = '<i class="fi flex fi-tr-browsers"></i>';
@@ -706,7 +745,7 @@
             resumeBackgroundProcess(); // 🚀 Trigger existing resume logic
         };
 
-        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, resumeBtn, expandBtn, miniProgress);
+        bar.append(toggleBtn, nameHandle, statsArea, autoPilotBtn, currentDateSyncBtn, resumeBtn, expandBtn, miniProgress);
         document.body.appendChild(bar);
 
         // 🚀 Enable Dragging ONLY for the Name Handle
@@ -758,6 +797,7 @@
         const nameHandle = document.getElementById('miniNameHandle');
         const statsArea = document.getElementById('miniStatsArea');
         const miniBtn = document.getElementById('miniAutoSyncBtn'); 
+        const miniCurrentBtn = document.getElementById('miniCurrentDateSyncBtn');
         const expandBtn = document.getElementById('miniExpandBtn');
         const closeBtn = document.getElementById('miniCloseBtn');
         const toggleBtn = document.getElementById('superCompactToggle');
@@ -815,12 +855,14 @@
                 // 🚀 Syncing or Paused
                 setSafeStyle(nameHandle, 'display', 'none');
                 setSafeStyle(miniBtn, 'display', 'none');
+                setSafeStyle(miniCurrentBtn, 'display', 'none');
                 setSafeStyle(statsArea, 'display', 'flex'); // 🚀 Always keep stats visible now
                 setSafeStyle(resumeBtn, 'display', isUploadPaused ? 'flex' : 'none');
             } else {
                 // 🚀 Idle
                 setSafeStyle(nameHandle, 'display', 'flex');
                 setSafeStyle(miniBtn, 'display', 'flex');
+                setSafeStyle(miniCurrentBtn, 'display', 'flex');
                 setSafeStyle(statsArea, 'display', 'none');
                 setSafeStyle(resumeBtn, 'display', 'none');
             }
@@ -844,8 +886,10 @@
             
             if (isAutoSyncRunning || isUploadPaused) {
                 setSafeStyle(miniBtn, 'display', 'none'); 
+                setSafeStyle(miniCurrentBtn, 'display', 'none'); 
             } else {
                 setSafeStyle(miniBtn, 'display', 'flex'); 
+                setSafeStyle(miniCurrentBtn, 'display', 'flex'); 
             }
             if (expandBtn) setSafeStyle(expandBtn, 'display', 'flex');
             if (closeBtn) setSafeStyle(closeBtn, 'display', 'flex');
@@ -906,20 +950,28 @@
         marginTop: '10px', display: 'none', flexWrap: 'wrap', gap: '10px', flexDirection: 'row',
       });
   
-      const buttonNames = ['Current Month', '1 Month', '2 Months', '3 Months', 'Custom Month', '⚡ Auto Sync'];
+      const buttonNames = ['Current Date', 'Current Month', '1 Month', '2 Months', '3 Months', 'Custom Month', '⚡ Auto Sync'];
       buttonNames.forEach((name) => {
         const btn = document.createElement('button');
         btn.innerText = name;
         Object.assign(btn.style, {
           padding: '6px 12px', border: '1px solid #ccc', borderRadius: '5px',
           cursor: 'pointer', background: '#fff', fontSize: '12px',
-          color: '#0065b3', fontWeight: 'bold', transition: 'all 0.1s ease'
+          color: name === 'Current Date' ? '#7b1fa2' : '#0065b3', fontWeight: 'bold', transition: 'all 0.1s ease'
         });
   
-        btn.onmouseover = () => { btn.style.background = '#0065b3'; btn.style.color = '#fff'; };
-        btn.onmouseout = () => { btn.style.background = '#fff'; btn.style.color = '#0065b3'; };
+        btn.onmouseover = () => { 
+          btn.style.background = name === 'Current Date' ? '#7b1fa2' : '#0065b3'; 
+          btn.style.color = '#fff'; 
+        };
+        btn.onmouseout = () => { 
+          btn.style.background = '#fff'; 
+          btn.style.color = name === 'Current Date' ? '#7b1fa2' : '#0065b3'; 
+        };
   
-        if (name === 'Current Month') {
+        if (name === 'Current Date') {
+          btn.onclick = () => handleCurrentDateClick(popup);
+        } else if (name === 'Current Month') {
           btn.onclick = () => handleCurrentMonthClick(popup);
         } else if (name === '1 Month') {
           btn.onclick = () => handleCustomMonthClick(popup, 1);
@@ -2851,6 +2903,135 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     const proposalBtn = document.querySelector('.button.view_proposals_btn');
     proposalBtn?.click();
   };
+
+  const handleCurrentDateClick = (passedPopup) => {
+    let popup = passedPopup;
+    if (!popup) popup = document.getElementById('my-dashboard-popup');
+
+    console.log("%c[Current Date] %cInitiating Current Date Proposals Extraction...", "color:#c084fc; font-weight:bold;", "color:#fff;");
+
+    extensionGlobalActive = true;
+    isAutoSyncRunning = true;
+    isSequentialExtractionActive = false;
+    accumulatedData = [];
+    tableData = [];
+    currentPageNum = 1;
+    syncStartTime = Date.now();
+
+    // UI Updates: Hide action buttons on mini bar while running
+    const miniCurrentBtn = document.getElementById('miniCurrentDateSyncBtn');
+    if (miniCurrentBtn) miniCurrentBtn.style.display = 'none';
+    const miniAutoBtn = document.getElementById('miniAutoSyncBtn');
+    if (miniAutoBtn) miniAutoBtn.style.display = 'none';
+
+    // If popup is open, clean up button container and add spinner
+    if (popup) {
+      popup.style.maxHeight = '500px';
+      const buttonContainer = document.getElementById('mainActBtn');
+      if (buttonContainer) buttonContainer.remove();
+      const spinner = createSpinner();
+      spinner.style.display = 'flex';
+      popup.appendChild(spinner);
+    }
+
+    // Show extraction overlay / spinner
+    createExtractionOverlay();
+
+    // Save today's date in local storage
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const yyyy = today.getFullYear();
+    const todayFormatted = `${dd}/${mm}/${yyyy}`;
+    chrome.storage.local.set({
+        filterStartDate: todayFormatted,
+        filterEndDate: todayFormatted
+    });
+
+    // 1. Navigate to proposals page if not already there
+    const targetUrlPart = '/portal/proposals/proposalDetails';
+    const proposalBtn = document.querySelector('.button.view_proposals_btn');
+    if (proposalBtn) {
+        proposalBtn.click();
+    }
+    if (!window.location.href.includes(targetUrlPart)) {
+        window.location.hash = '#/portal/proposals/proposalDetails';
+    }
+
+    // 2. Poll for #lastest10 button ("Current Date")
+    let attempts = 0;
+    const maxAttempts = 60; // up to 30 seconds
+
+    const findAndClickLastest10 = () => {
+        attempts++;
+        const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
+        const isLoaderVisible = faveoLoader && (
+            faveoLoader.offsetWidth > 0 || 
+            faveoLoader.offsetHeight > 0 || 
+            window.getComputedStyle(faveoLoader).display !== 'none'
+        );
+
+        const currentDateButton = document.getElementById('lastest10') || 
+                                  document.querySelector('button#lastest10') || 
+                                  [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase() === 'current date');
+
+        if ((!currentDateButton || isLoaderVisible) && attempts < maxAttempts) {
+            console.log(`⏳ [Current Date] Waiting for page and #lastest10 button... (${attempts}/${maxAttempts})`);
+            setTimeout(findAndClickLastest10, 500);
+            return;
+        }
+
+        if (!currentDateButton) {
+            console.warn('❌ [Current Date] Button #lastest10 ("Current Date") not found after timeout.');
+            if (!isGamePlaying) removeExtractionOverlay();
+            isAutoSyncRunning = false;
+            updateMinimizedStatus();
+            document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
+            alert('⚠️ "Current Date" button (#lastest10) not found on Proposals page.');
+            return;
+        }
+
+        console.log('🎯 [Current Date] Found #lastest10 ("Current Date") button. Clicking now...');
+        currentDateButton.click();
+        currentDateButton.dispatchEvent(new Event('click', { bubbles: true }));
+
+        // 3. Wait for Faveo loader and table to refresh with Current Date records
+        waitForCurrentDateTable();
+    };
+
+    const waitForCurrentDateTable = () => {
+        let tableAttempts = 0;
+        const maxTableAttempts = 40;
+
+        const checkTableReady = () => {
+            tableAttempts++;
+            const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
+            const isLoaderVisible = faveoLoader && (
+                faveoLoader.offsetWidth > 0 || 
+                faveoLoader.offsetHeight > 0 || 
+                window.getComputedStyle(faveoLoader).display !== 'none'
+            );
+
+            const table = document.querySelector('.proposalDetails-tbl');
+
+            if ((isLoaderVisible || !table) && tableAttempts < maxTableAttempts) {
+                console.log(`⏳ [Current Date] Waiting for table to load... (${tableAttempts}/${maxTableAttempts})`);
+                setTimeout(checkTableReady, 500);
+                return;
+            }
+
+            console.log('🚀 [Current Date] Table loaded! Launching extractRenewalTableData()...');
+            document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
+            setTimeout(() => {
+                extractRenewalTableData();
+            }, 1000);
+        };
+
+        setTimeout(checkTableReady, 800);
+    };
+
+    setTimeout(findAndClickLastest10, 1000);
+  };
   
   const handleAutoSyncClick = (passedPopup) => {
     let popup = passedPopup;
@@ -3837,6 +4018,8 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
       // ⚡ Show mini auto-sync button again on error
       const miniBtn = document.getElementById('miniAutoSyncBtn');
       if (miniBtn) miniBtn.style.display = 'flex';
+      const miniCurrentBtn = document.getElementById('miniCurrentDateSyncBtn');
+      if (miniCurrentBtn) miniCurrentBtn.style.display = 'flex';
 
       if (summaryDiv) {
         summaryDiv.style.display = 'block';
