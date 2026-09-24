@@ -670,26 +670,20 @@
 
         const currentDateSyncBtn = document.createElement('button');
         currentDateSyncBtn.id = 'miniCurrentDateSyncBtn';
-        currentDateSyncBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 32 32" style="pointer-events:none; filter: drop-shadow(0 2px 4px rgba(126, 34, 206, 0.6));">
+        currentDateSyncBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 32 32" style="pointer-events:none; filter: drop-shadow(0 2px 4px rgba(14, 116, 144, 0.65));">
             <defs>
-                <linearGradient id="purpleCalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#c084fc"/>
-                    <stop offset="50%" stop-color="#9333ea"/>
-                    <stop offset="100%" stop-color="#6b21a8"/>
+                <linearGradient id="recentCalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#67e8f9"/>
+                    <stop offset="50%" stop-color="#0891b2"/>
+                    <stop offset="100%" stop-color="#155e75"/>
                 </linearGradient>
             </defs>
-            <!-- Solid Purple Calendar Base -->
-            <rect x="3" y="6" width="26" height="23" rx="5" fill="url(#purpleCalGrad)"/>
-            <!-- Top Dark Purple Header Bar -->
-            <path d="M3 11C3 8.23858 5.23858 6 8 6H24C26.7614 6 29 8.23858 29 11V12H3V11Z" fill="#581c87"/>
-            <!-- Shiny White Binder Rings -->
+            <rect x="3" y="6" width="26" height="23" rx="5" fill="url(#recentCalGrad)"/>
+            <path d="M3 11C3 8.23858 5.23858 6 8 6H24C26.7614 6 29 8.23858 29 11V12H3V11Z" fill="#164e63"/>
             <rect x="8" y="2.5" width="3" height="6" rx="1.5" fill="#ffffff"/>
             <rect x="21" y="2.5" width="3" height="6" rx="1.5" fill="#ffffff"/>
-            <!-- Calendar Crisp White Inner Page -->
-            <rect x="6" y="14" width="20" height="12" rx="3" fill="#ffffff"/>
-            <!-- Current Date Purple Indicator Badge -->
-            <circle cx="16" cy="20" r="4" fill="#9333ea"/>
-            <circle cx="16" cy="20" r="1.8" fill="#ffffff"/>
+            <rect x="6" y="14" width="20" height="12" rx="3" fill="#ecfeff"/>
+            <text x="16" y="22" text-anchor="middle" font-family="Arial, sans-serif" font-size="7" font-weight="700" fill="#0e7490">5D</text>
         </svg>`;
         Object.assign(currentDateSyncBtn.style, {
             display: 'flex', // 🚀 Default Visible
@@ -698,7 +692,7 @@
             width: '28px', height: '28px', alignItems: 'center', justifyContent: 'center',
             transition: 'transform 0.2s', filter: 'drop-shadow(0 0 6px rgba(192, 132, 252, 0.7))'
         });
-        currentDateSyncBtn.title = 'Extract Current Date Proposals (Table)';
+        currentDateSyncBtn.title = 'Extract Last 5 Days Proposals';
         currentDateSyncBtn.onclick = (e) => {
             e.stopPropagation();
             currentDateSyncBtn.style.display = 'none'; // 🚀 Hide once clicked
@@ -2908,7 +2902,7 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     let popup = passedPopup;
     if (!popup) popup = document.getElementById('my-dashboard-popup');
 
-    console.log("%c[Current Date] %cInitiating Current Date Proposals Extraction...", "color:#c084fc; font-weight:bold;", "color:#fff;");
+        console.log("%c[Current Date] %cExtracting proposals currently visible without applying a date filter...", "color:#c084fc; font-weight:bold;", "color:#fff;");
 
     extensionGlobalActive = true;
     isAutoSyncRunning = true;
@@ -2937,18 +2931,15 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     // Show extraction overlay / spinner
     createExtractionOverlay();
 
-    // Save today's date in local storage
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const yyyy = today.getFullYear();
-    const todayFormatted = `${dd}/${mm}/${yyyy}`;
-    chrome.storage.local.set({
-        filterStartDate: todayFormatted,
-        filterEndDate: todayFormatted
-    });
+    // Do not apply a date range. Keep the extractor aligned with the table
+    // currently rendered by the proposals page.
+    const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
+    const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    chrome.storage.local.set({ filterStartDate: null, filterEndDate: null });
 
-    // 1. Navigate to proposals page if not already there
+    // Navigate to proposals page if not already there
     const targetUrlPart = '/portal/proposals/proposalDetails';
     const proposalBtn = document.querySelector('.button.view_proposals_btn');
     if (proposalBtn) {
@@ -2958,11 +2949,12 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         window.location.hash = '#/portal/proposals/proposalDetails';
     }
 
-    // 2. Poll for #lastest10 button ("Current Date")
+    // Wait for the proposals page, then use its built-in "last 5 days" view.
     let attempts = 0;
     const maxAttempts = 60; // up to 30 seconds
+    let lastFiveDaysClicked = false;
 
-    const findAndClickLastest10 = () => {
+    const waitForLastFiveDaysTable = () => {
         attempts++;
         const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
         const isLoaderVisible = faveoLoader && (
@@ -2971,66 +2963,58 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
             window.getComputedStyle(faveoLoader).display !== 'none'
         );
 
-        const currentDateButton = document.getElementById('lastest10') || 
-                                  document.querySelector('button#lastest10') || 
-                                  [...document.querySelectorAll('button')].find(b => b.textContent.trim().toLowerCase() === 'current date');
+        const lastFiveDaysButton = document.getElementById('currMonth');
+        if (!lastFiveDaysClicked) {
+            if ((isLoaderVisible || !lastFiveDaysButton) && attempts < maxAttempts) {
+                console.log(`⏳ [Current Date] Waiting for proposals page and #currMonth button... (${attempts}/${maxAttempts})`);
+                setTimeout(waitForLastFiveDaysTable, 500);
+                return;
+            }
 
-        if ((!currentDateButton || isLoaderVisible) && attempts < maxAttempts) {
-            console.log(`⏳ [Current Date] Waiting for page and #lastest10 button... (${attempts}/${maxAttempts})`);
-            setTimeout(findAndClickLastest10, 500);
+            if (!lastFiveDaysButton) {
+                console.warn('❌ [Current Date] #currMonth (last 5 days) button was not found after timeout.');
+                if (!isGamePlaying) removeExtractionOverlay();
+                isAutoSyncRunning = false;
+                updateMinimizedStatus();
+                document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
+                alert('⚠️ Last 5 days button (#currMonth) not found on Proposals page.');
+                return;
+            }
+
+            console.log('🎯 [Current Date] Clicking #currMonth (last 5 days) without applying a custom date filter...');
+            lastFiveDaysClicked = true;
+            lastFiveDaysButton.click();
+            lastFiveDaysButton.dispatchEvent(new Event('click', { bubbles: true }));
+            setTimeout(waitForLastFiveDaysTable, 800);
             return;
         }
 
-        if (!currentDateButton) {
-            console.warn('❌ [Current Date] Button #lastest10 ("Current Date") not found after timeout.');
+        const proposalsTable = document.querySelector('.proposalDetails-tbl');
+        const tableRows = proposalsTable?.querySelectorAll('tbody tr') || [];
+        const tableIsVisible = proposalsTable && window.getComputedStyle(proposalsTable).display !== 'none';
+
+        if ((isLoaderVisible || !tableIsVisible || tableRows.length === 0) && attempts < maxAttempts) {
+            console.log(`⏳ [Current Date] Waiting for #currMonth results table... (${attempts}/${maxAttempts})`);
+            setTimeout(waitForLastFiveDaysTable, 500);
+            return;
+        }
+
+        if (!tableIsVisible || tableRows.length === 0) {
+            console.warn('❌ [Current Date] #currMonth results table was not found after timeout.');
             if (!isGamePlaying) removeExtractionOverlay();
             isAutoSyncRunning = false;
             updateMinimizedStatus();
             document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
-            alert('⚠️ "Current Date" button (#lastest10) not found on Proposals page.');
+            alert('⚠️ Last 5 days proposals table not found on Proposals page.');
             return;
         }
 
-        console.log('🎯 [Current Date] Found #lastest10 ("Current Date") button. Clicking now...');
-        currentDateButton.click();
-        currentDateButton.dispatchEvent(new Event('click', { bubbles: true }));
-
-        // 3. Wait for Faveo loader and table to refresh with Current Date records
-        waitForCurrentDateTable();
+        console.log(`🚀 [Current Date] #currMonth table loaded with ${tableRows.length} row(s). Extracting...`);
+        document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
+        setTimeout(() => extractRenewalTableData(), 1000);
     };
 
-    const waitForCurrentDateTable = () => {
-        let tableAttempts = 0;
-        const maxTableAttempts = 40;
-
-        const checkTableReady = () => {
-            tableAttempts++;
-            const faveoLoader = document.querySelector('.main-loading') || document.querySelector('div.loading');
-            const isLoaderVisible = faveoLoader && (
-                faveoLoader.offsetWidth > 0 || 
-                faveoLoader.offsetHeight > 0 || 
-                window.getComputedStyle(faveoLoader).display !== 'none'
-            );
-
-            const table = document.querySelector('.proposalDetails-tbl');
-
-            if ((isLoaderVisible || !table) && tableAttempts < maxTableAttempts) {
-                console.log(`⏳ [Current Date] Waiting for table to load... (${tableAttempts}/${maxTableAttempts})`);
-                setTimeout(checkTableReady, 500);
-                return;
-            }
-
-            console.log('🚀 [Current Date] Table loaded! Launching extractRenewalTableData()...');
-            document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
-            setTimeout(() => {
-                extractRenewalTableData();
-            }, 1000);
-        };
-
-        setTimeout(checkTableReady, 800);
-    };
-
-    setTimeout(findAndClickLastest10, 1000);
+    setTimeout(waitForLastFiveDaysTable, 1000);
   };
   
   const handleAutoSyncClick = (passedPopup) => {
