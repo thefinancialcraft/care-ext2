@@ -2931,28 +2931,21 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
     // Show extraction overlay / spinner
     createExtractionOverlay();
 
-    // Do not apply a date range. Keep the extractor aligned with the table
-    // currently rendered by the proposals page.
-    const fromInput = document.getElementById('from_date') || document.querySelector('input[id*="from_date"]');
-    const toInput = document.getElementById('to_date') || document.querySelector('input[id*="to_date"]');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
-    chrome.storage.local.set({ filterStartDate: null, filterEndDate: null });
-
-    // Navigate to proposals page if not already there
+    // Read the table as-is when the user is already on the proposals page.
     const targetUrlPart = '/portal/proposals/proposalDetails';
-    const proposalBtn = document.querySelector('.button.view_proposals_btn');
-    if (proposalBtn) {
-        proposalBtn.click();
-    }
-    if (!window.location.href.includes(targetUrlPart)) {
+    const isAlreadyOnProposalsPage = window.location.href.includes(targetUrlPart);
+
+    if (!isAlreadyOnProposalsPage) {
+        // Navigate first; the built-in last-5-days view will be selected after load.
+        const proposalBtn = document.querySelector('.button.view_proposals_btn');
+        if (proposalBtn) proposalBtn.click();
         window.location.hash = '#/portal/proposals/proposalDetails';
     }
 
     // Wait for the proposals page, then use its built-in "last 5 days" view.
     let attempts = 0;
     const maxAttempts = 60; // up to 30 seconds
-    let lastFiveDaysClicked = false;
+    let lastFiveDaysClicked = isAlreadyOnProposalsPage;
 
     const waitForLastFiveDaysTable = () => {
         attempts++;
@@ -2992,6 +2985,23 @@ const handleCustomMonthClick = (passedPopup, monthsBack) => {
         const proposalsTable = document.querySelector('.proposalDetails-tbl');
         const tableRows = proposalsTable?.querySelectorAll('tbody tr') || [];
         const tableIsVisible = proposalsTable && window.getComputedStyle(proposalsTable).display !== 'none';
+        const commissionContainer = document.querySelector('.Commission_details_container');
+        const hasNoDataMessage = commissionContainer?.textContent?.trim().toLowerCase().includes('no data found');
+        const isBlankHiddenTable = proposalsTable && (
+            proposalsTable.hidden ||
+            proposalsTable.hasAttribute('hidden') ||
+            (!tableIsVisible && tableRows.length === 0)
+        );
+
+        if (!isLoaderVisible && (hasNoDataMessage || isBlankHiddenTable)) {
+            console.log('[Current Date] No proposals data available. Skipping extraction.');
+            if (!isGamePlaying) removeExtractionOverlay();
+            isAutoSyncRunning = false;
+            updateMinimizedStatus();
+            document.querySelectorAll('#loader-spinner').forEach(s => s.remove());
+            document.getElementById('liveExtractModal')?.remove();
+            return;
+        }
 
         if ((isLoaderVisible || !tableIsVisible || tableRows.length === 0) && attempts < maxAttempts) {
             console.log(`⏳ [Current Date] Waiting for #currMonth results table... (${attempts}/${maxAttempts})`);
