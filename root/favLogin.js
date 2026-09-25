@@ -825,7 +825,7 @@
             style = document.createElement('style'); style.id = 'favLoginStyles';
             style.innerHTML = '\
                 .flex { display: flex !important; align-items: center; justify-content: center; }\
-                #agentListContainer { display: flex !important; flex-direction: column !important; overflow-y: auto !important; max-height: 220px !important; gap: 6px; scrollbar-width: none; -ms-overflow-style: none; }\
+                #agentListContainer { display: flex !important; flex-direction: column !important; overflow-y: auto !important; max-height: 220px; min-height: 0; gap: 6px; scrollbar-width: none; -ms-overflow-style: none; }\
                 #agentListContainer::-webkit-scrollbar { display: none !important; }\
                 @keyframes favSlideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }\
                 .agent-card { width: 100%; padding: 12px 15px; border: none; border-radius: 12px; background: rgba(255, 255, 255, 0.05); color: #fff; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s ease; border: 1px solid rgba(255,255,255,0.05); position: relative; }\
@@ -998,13 +998,43 @@
             // 🎯 AUTHORIZED ACTIONS
             header.innerHTML = '<div style="display:flex; align-items:center; gap:10px;"><i class="fi flex fi-rr-shield-check" style="color:#4caf50; font-size:18px;"></i><h3 class="fav-login-title">Select Agent Profile</h3></div>';
             
-            chrome.storage.local.get(['is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_next_login_time', 'autopilot_agents'], function(res) {
+            chrome.storage.local.get(['favUserProfile', 'is_admin', 'is_master_extension', 'is_autopilot_active', 'autopilot_paused', 'autopilot_index', 'autopilot_next_login_time', 'autopilot_agents'], function(res) {
                 if (res.is_master_extension && res.is_autopilot_active && !res.autopilot_paused && res.autopilot_agents && res.autopilot_agents.length > 0) {
+                    var autopilotProfile = res.favUserProfile || {};
+                    var autopilotAllowedIds = String(autopilotProfile.agent_access || '').replace(/[{}]/g, '').split(',').map(function(id) {
+                        return id.trim();
+                    }).filter(Boolean);
+                    var visibleAutopilotAgents = res.autopilot_agents.filter(function(agent) {
+                        var agentId = String(getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '').trim();
+                        return autopilotAllowedIds.includes(agentId);
+                    });
+
+                    if (visibleAutopilotAgents.length === 0) {
+                        list.innerHTML = '<div style="color:rgba(255,255,255,0.7); padding:24px 12px; text-align:center; font-size:12px;">No agent profiles are assigned to this user.</div>';
+                        return;
+                    }
                     var nextLogin = res.autopilot_next_login_time || 0;
-                    runAutopilotUI(res.autopilot_agents, nextLogin, res.autopilot_index);
+                    runAutopilotUI(visibleAutopilotAgents, nextLogin, res.autopilot_index % visibleAutopilotAgents.length);
                 } else {
                     chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
-                        if (response && response.success) renderAgents(response.agents);
+                        if (response && response.success) {
+                            var userProfile = res.favUserProfile || {};
+                            var rawAccess = userProfile.agent_access || '';
+                            var allowedAgentIds = String(rawAccess).replace(/[{}]/g, '').split(',').map(function(id) {
+                                return id.trim();
+                            }).filter(Boolean);
+                            var canSeeAllAgents = false;
+                            var visibleAgents = canSeeAllAgents ? response.agents : response.agents.filter(function(agent) {
+                                var agentId = String(getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '').trim();
+                                return allowedAgentIds.includes(agentId);
+                            });
+
+                            if (!canSeeAllAgents && visibleAgents.length === 0) {
+                                list.innerHTML = '<div style="color:rgba(255,255,255,0.7); padding:24px 12px; text-align:center; font-size:12px;">No agent profiles are assigned to this user.</div>';
+                            } else {
+                                renderAgents(visibleAgents);
+                            }
+                        }
                         else {
                             list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline - Reopening Tab...</div>';
                             console.warn('⚠️ Offline status detected in login popup! Reopening fresh login tab...');
@@ -1418,6 +1448,15 @@
 
         var renderAgents = function(agents) {
             list.innerHTML = '';
+            var loginPopup = document.getElementById('favLoginPopup');
+            if (loginPopup) {
+                loginPopup.style.width = '320px';
+                loginPopup.style.maxWidth = '320px';
+                loginPopup.style.height = 'auto';
+                loginPopup.style.maxHeight = '';
+            }
+            list.style.height = 'auto';
+            list.style.maxHeight = '220px';
             agents.forEach(function(agent, index) {
                 var aName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || 'Unknown';
                 var aId = getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '--';
@@ -1574,6 +1613,15 @@
 
         var showAdminPanel = function(list, originalAgents) {
             list.innerHTML = '';
+            var adminPopup = document.getElementById('favLoginPopup');
+            if (adminPopup) {
+                adminPopup.style.width = '540px';
+                adminPopup.style.maxWidth = 'calc(100vw - 40px)';
+                adminPopup.style.height = '90vh';
+                adminPopup.style.maxHeight = 'calc(100vh - 40px)';
+            }
+            list.style.height = 'calc(90vh - 110px)';
+            list.style.maxHeight = 'calc(100vh - 110px)';
             var panelHeader = document.createElement('div');
             panelHeader.style.cssText = 'padding:10px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:10px;';
             panelHeader.innerHTML = '<i class="fi flex fi-rr-shield-check" style="color:#f44336; font-size:18px;"></i><div style="text-align:left;"><div style="font-size:14px; font-weight:700;">ADMIN CONTROL CENTER</div><div style="font-size:9px; opacity:0.6;">System & Security Management</div></div>';
@@ -1617,6 +1665,235 @@
                 openAdminResetPasswordView(list, originalAgents);
             };
             list.appendChild(resetPassCard);
+
+            // 👥 USER ACCESS MANAGEMENT
+            var usersCard = document.createElement('button');
+            usersCard.className = 'agent-card';
+            usersCard.style.cssText = 'background:rgba(0,188,212,0.12); border:1px solid rgba(0,188,212,0.4); margin-bottom:8px;';
+            usersCard.innerHTML = '<div class="agent-icon-box" style="background:#00acc1;"><i class="fi flex fi-rr-users"></i></div><div style="text-align:left;"><div style="font-size:13px; font-weight:700; color:#fff;">MANAGE USERS</div><div style="font-size:10px; opacity:0.7;">Access, visibility and security controls</div></div><i class="fi fi-rr-angle-small-right" style="margin-left:auto; opacity:0.6;"></i>';
+            usersCard.onclick = function() {
+                openAdminUserManagement(list, originalAgents);
+            };
+            list.appendChild(usersCard);
+        };
+
+        var openAdminUserManagement = function(list, originalAgents) {
+            list.innerHTML = '';
+            var adminPopup = document.getElementById('favLoginPopup');
+            if (adminPopup) {
+                adminPopup.style.width = '540px';
+                adminPopup.style.maxWidth = 'calc(100vw - 40px)';
+                adminPopup.style.height = '90vh';
+                adminPopup.style.maxHeight = 'calc(100vh - 40px)';
+            }
+            list.style.height = 'calc(90vh - 110px)';
+            list.style.maxHeight = 'calc(100vh - 110px)';
+
+            var header = document.createElement('div');
+            header.style.cssText = 'padding:10px; display:flex; align-items:center; gap:10px; border-bottom:1px solid rgba(255,255,255,0.1); margin-bottom:10px;';
+            header.innerHTML = '<i class="fi flex fi-rr-users" style="color:#26c6da; font-size:18px;"></i><div style="text-align:left;"><div style="font-size:14px; font-weight:700;">USER ACCESS CONTROL</div><div style="font-size:9px; opacity:0.6;">ext_user_data management</div></div>';
+
+            var backBtn = document.createElement('i');
+            backBtn.className = 'fi flex fi-rr-arrow-small-left';
+            backBtn.style.cssText = 'margin-left:auto; cursor:pointer; opacity:0.6; font-size:18px;';
+            backBtn.title = 'Back to admin center';
+            backBtn.onclick = function() { showAdminPanel(list, originalAgents); };
+            header.appendChild(backBtn);
+            list.appendChild(header);
+
+            var toolbar = document.createElement('div');
+            toolbar.style.cssText = 'display:flex; gap:6px; margin-bottom:8px;';
+
+            var searchInput = document.createElement('input');
+            searchInput.type = 'search';
+            searchInput.placeholder = 'Search name, email or ID...';
+            searchInput.style.cssText = 'flex:1; min-width:0; padding:8px 10px; border-radius:7px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.08); color:#fff; outline:none; font-size:11px;';
+
+            var refreshBtn = document.createElement('button');
+            refreshBtn.innerHTML = '<i class="fi flex fi-rr-refresh"></i>';
+            refreshBtn.title = 'Refresh users';
+            refreshBtn.style.cssText = 'width:34px; border:1px solid rgba(255,255,255,0.15); border-radius:7px; background:rgba(38,198,218,0.2); color:#fff; cursor:pointer;';
+            toolbar.append(searchInput, refreshBtn);
+            list.appendChild(toolbar);
+
+            var summary = document.createElement('div');
+            summary.style.cssText = 'font-size:10px; color:rgba(255,255,255,0.55); margin:0 2px 8px;';
+            list.appendChild(summary);
+
+            var usersContainer = document.createElement('div');
+            usersContainer.style.cssText = 'display:flex; flex:1; min-height:0; flex-direction:column; gap:8px; max-height:none; overflow:auto; padding-right:2px;';
+            list.appendChild(usersContainer);
+
+            var users = [];
+            var toBool = function(value) { return value === true || String(value).toLowerCase() === 'true'; };
+            var accessValues = function(value) {
+                return String(value || '').replace(/[{}]/g, '').split(',').map(function(item) { return item.trim(); }).filter(Boolean);
+            };
+
+            var addToggle = function(parent, label, key, user) {
+                var labelEl = document.createElement('label');
+                labelEl.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:10px; color:rgba(255,255,255,0.75);';
+                var text = document.createElement('span');
+                text.innerText = label;
+                var input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = toBool(user[key]);
+                input.dataset.field = key;
+                input.style.cssText = 'accent-color:#26c6da; width:15px; height:15px; cursor:pointer;';
+                labelEl.append(text, input);
+                parent.appendChild(labelEl);
+            };
+
+            var renderUsers = function() {
+                var query = searchInput.value.trim().toLowerCase();
+                usersContainer.innerHTML = '';
+                var visibleUsers = users.filter(function(user) {
+                    return [user.user_name, user.user_email, user.extension_id, user.status].join(' ').toLowerCase().includes(query);
+                });
+                summary.innerText = visibleUsers.length + ' of ' + users.length + ' users';
+
+                if (!visibleUsers.length) {
+                    var empty = document.createElement('div');
+                    empty.innerText = users.length ? 'No matching users.' : 'No users returned.';
+                    empty.style.cssText = 'padding:20px; text-align:center; color:rgba(255,255,255,0.5); font-size:12px;';
+                    usersContainer.appendChild(empty);
+                    return;
+                }
+
+                visibleUsers.forEach(function(user) {
+                    var card = document.createElement('div');
+                    card.style.cssText = 'padding:9px; border:1px solid rgba(255,255,255,0.1); border-radius:8px; background:rgba(255,255,255,0.045);';
+
+                    var title = document.createElement('div');
+                    title.style.cssText = 'display:flex; justify-content:space-between; gap:8px; align-items:flex-start; margin-bottom:7px;';
+                    var identity = document.createElement('div');
+                    var name = document.createElement('div');
+                    name.innerText = user.user_name || 'Unnamed user';
+                    name.style.cssText = 'font-size:12px; font-weight:700; color:#fff;';
+                    var details = document.createElement('div');
+                    details.innerText = (user.user_email || '-') + ' | ID: ' + (user.extension_id || '-');
+                    details.style.cssText = 'font-size:9px; color:rgba(255,255,255,0.5); margin-top:2px;';
+                    identity.append(name, details);
+
+                    var status = document.createElement('select');
+                    status.dataset.field = 'status';
+                    ['Approved', 'Pending', 'Blocked'].forEach(function(optionValue) {
+                        var option = document.createElement('option');
+                        option.value = optionValue;
+                        option.innerText = optionValue;
+                        option.selected = String(user.status || '').toLowerCase() === optionValue.toLowerCase();
+                        status.appendChild(option);
+                    });
+                    status.style.cssText = 'padding:4px; border-radius:5px; border:1px solid rgba(255,255,255,0.2); background:#263238; color:#fff; font-size:10px;';
+                    title.append(identity, status);
+                    card.appendChild(title);
+
+                    var controls = document.createElement('div');
+                    controls.style.cssText = 'display:grid; grid-template-columns:1fr 1fr; gap:5px 12px; padding:7px; border-top:1px solid rgba(255,255,255,0.08);';
+                    addToggle(controls, 'Admin', 'is_admin', user);
+                    addToggle(controls, 'Profile', 'profile_visible', user);
+                    addToggle(controls, 'Renewal', 'renewal_visible', user);
+                    addToggle(controls, 'OTP required', 'otp_required', user);
+                    addToggle(controls, 'Digital discount', 'digital_discount', user);
+                    addToggle(controls, 'EMI option', 'emi_option', user);
+                    card.appendChild(controls);
+
+                    var accessLabel = document.createElement('div');
+                    accessLabel.innerText = 'Agent access';
+                    accessLabel.style.cssText = 'font-size:11px; font-weight:600; color:rgba(255,255,255,0.8); margin:9px 0 5px;';
+                    var accessDropdown = document.createElement('div');
+                    accessDropdown.style.cssText = 'position:relative; width:100%;';
+                    var accessButton = document.createElement('button');
+                    accessButton.type = 'button';
+                    accessButton.innerHTML = '<span>Select agent access</span><i class="fi flex fi-rr-angle-small-down"></i>';
+                    accessButton.style.cssText = 'width:100%; display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:#263238; color:#fff; cursor:pointer; font-size:11px; text-align:left;';
+                    var accessMenu = document.createElement('div');
+                    accessMenu.style.cssText = 'display:none; position:absolute; z-index:20; left:0; right:0; top:calc(100% + 4px); max-height:210px; overflow:auto; padding:6px; border:1px solid rgba(38,198,218,0.5); border-radius:6px; background:#18252d; box-shadow:0 8px 20px rgba(0,0,0,0.35);';
+                    var selectedAccess = accessValues(user.agent_access);
+                    var accessCheckboxes = [];
+                    var updateAccessButton = function() {
+                        var selectedCount = accessCheckboxes.filter(function(input) { return input.checked; }).length;
+                        accessButton.firstChild.innerText = selectedCount ? selectedCount + ' agent(s) selected' : 'Select agent access';
+                    };
+                    (originalAgents || []).forEach(function(agent) {
+                        var agentId = String(getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '').trim();
+                        var agentName = getKey(agent, 'agent name') || getKey(agent, 'agent_name') || agentId;
+                        if (!agentId) return;
+                        var accessRow = document.createElement('label');
+                        accessRow.style.cssText = 'display:flex; align-items:center; gap:8px; padding:6px 5px; border-radius:4px; cursor:pointer; color:#fff; font-size:10px;';
+                        accessRow.onmouseenter = function() { accessRow.style.background = 'rgba(38,198,218,0.15)'; };
+                        accessRow.onmouseleave = function() { accessRow.style.background = 'transparent'; };
+                        var accessCheckbox = document.createElement('input');
+                        accessCheckbox.type = 'checkbox';
+                        accessCheckbox.value = agentId;
+                        accessCheckbox.checked = selectedAccess.includes(agentId);
+                        accessCheckbox.style.cssText = 'accent-color:#26c6da; width:15px; height:15px; cursor:pointer;';
+                        accessCheckbox.onchange = updateAccessButton;
+                        accessCheckboxes.push(accessCheckbox);
+                        var accessText = document.createElement('span');
+                        accessText.innerText = agentName + ' (' + agentId + ')';
+                        accessRow.append(accessCheckbox, accessText);
+                        accessMenu.appendChild(accessRow);
+                    });
+                    if (!accessCheckboxes.length) {
+                        var noAccess = document.createElement('div');
+                        noAccess.innerText = selectedAccess.length ? selectedAccess.join(', ') : 'No agents available';
+                        noAccess.style.cssText = 'padding:8px; color:rgba(255,255,255,0.5); font-size:10px;';
+                        accessMenu.appendChild(noAccess);
+                    }
+                    accessButton.onclick = function(event) {
+                        event.stopPropagation();
+                        accessMenu.style.display = accessMenu.style.display === 'block' ? 'none' : 'block';
+                    };
+                    accessMenu.onclick = function(event) { event.stopPropagation(); };
+                    accessDropdown.append(accessButton, accessMenu);
+                    document.addEventListener('click', function() { accessMenu.style.display = 'none'; }, { once: false });
+                    updateAccessButton();
+                    card.append(accessLabel, accessDropdown);
+
+                    var saveBtn = document.createElement('button');
+                    saveBtn.innerHTML = '<i class="fi flex fi-rr-check"></i> SAVE USER';
+                    saveBtn.style.cssText = 'width:100%; margin-top:7px; padding:7px; border:0; border-radius:5px; background:#00838f; color:#fff; cursor:pointer; font-size:10px; font-weight:700;';
+                    saveBtn.onclick = function() {
+                        var changes = { status: status.value };
+                        card.querySelectorAll('input[data-field]').forEach(function(input) { changes[input.dataset.field] = input.checked; });
+                        changes.agent_access = accessCheckboxes.filter(function(input) { return input.checked; }).map(function(input) { return input.value; }).join(',');
+                        saveBtn.disabled = true;
+                        saveBtn.innerText = 'SAVING...';
+                        chrome.runtime.sendMessage({ type: 'UPDATE_EXT_USER', payload: { id: user.id, changes: changes } }, function(response) {
+                            if (response && response.success) {
+                                Object.assign(user, changes);
+                                saveBtn.innerText = 'SAVED';
+                                saveBtn.style.background = '#2e7d32';
+                                setTimeout(function() { saveBtn.innerHTML = '<i class="fi flex fi-rr-check"></i> SAVE USER'; saveBtn.style.background = '#00838f'; saveBtn.disabled = false; }, 1200);
+                            } else {
+                                saveBtn.innerText = 'SAVE FAILED';
+                                saveBtn.style.background = '#c62828';
+                                setTimeout(function() { saveBtn.innerText = 'RETRY SAVE'; saveBtn.style.background = '#00838f'; saveBtn.disabled = false; }, 1800);
+                            }
+                        });
+                    };
+                    card.appendChild(saveBtn);
+                    usersContainer.appendChild(card);
+                });
+            };
+
+            var loadUsers = function() {
+                usersContainer.innerHTML = '<div style="padding:20px; text-align:center; color:rgba(255,255,255,0.6); font-size:12px;">Loading ext_user_data...</div>';
+                chrome.runtime.sendMessage({ type: 'GET_ALL_USERS' }, function(response) {
+                    if (response && response.success && Array.isArray(response.users)) {
+                        users = response.users;
+                        renderUsers();
+                    } else {
+                        users = [];
+                        usersContainer.innerHTML = '<div style="padding:20px; text-align:center; color:#ff8a80; font-size:12px;">Failed to load users.</div>';
+                    }
+                });
+            };
+
+            searchInput.oninput = renderUsers;
+            refreshBtn.onclick = loadUsers;
+            loadUsers();
         };
 
         var openAdminResetPasswordView = function(list, originalAgents) {
@@ -2062,7 +2339,18 @@
             setTimeout(function() {
                 list.innerHTML = '<div style="color:rgba(255,255,255,0.4); font-size:12px; padding:20px; text-align:center;">Reloading agents...</div>';
                 chrome.runtime.sendMessage({ type: 'FETCH_AGENTS' }, function(response) {
-                    if (response && response.success) renderAgents(response.agents);
+                    if (response && response.success) {
+                        chrome.storage.local.get(['favUserProfile', 'is_admin'], function(profileRes) {
+                            var profile = profileRes.favUserProfile || {};
+                            var allowedIds = String(profile.agent_access || '').replace(/[{}]/g, '').split(',').map(function(id) { return id.trim(); }).filter(Boolean);
+                            var showAll = false;
+                            var visibleAgents = showAll ? response.agents : response.agents.filter(function(agent) {
+                                var agentId = String(getKey(agent, 'agent id') || getKey(agent, 'agent_id') || '').trim();
+                                return allowedIds.includes(agentId);
+                            });
+                            renderAgents(visibleAgents);
+                        });
+                    }
                     else {
                         list.innerHTML = '<div style="color:#ff5252; padding:20px; text-align:center;">Offline - Reopening Tab...</div>';
                         console.warn('⚠️ Offline status detected in global error fallback! Reopening fresh login tab...');

@@ -720,7 +720,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'GET_ALL_USERS') {
     const SUPABASE_URL = 'https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?select=*';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
-    fetch(SUPABASE_URL, {
+    fetch(SUPABASE_URL, { 
       method: 'GET',
       headers: {
         'apikey': SUPABASE_KEY,
@@ -737,6 +737,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch(error => sendResponse({ success: false, message: error.message }));
     return true; // Keep channel open
+  }
+  else if (message.type === 'UPDATE_EXT_USER') {
+    const payload = message.payload || {};
+    const userId = String(payload.id || '').trim();
+    const allowedFields = ['status', 'is_admin', 'profile_visible', 'renewal_visible', 'otp_required', 'digital_discount', 'emi_option', 'agent_access'];
+    const changes = {};
+
+    if (!userId) {
+      sendResponse({ success: false, message: 'Missing user id' });
+      return true;
+    }
+
+    allowedFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(payload.changes || {}, field)) {
+        changes[field] = field === 'status' || field === 'agent_access'
+          ? String(payload.changes[field] || '')
+          : Boolean(payload.changes[field]);
+      }
+    });
+
+    if (Object.keys(changes).length === 0) {
+      sendResponse({ success: false, message: 'No editable fields supplied' });
+      return true;
+    }
+
+    changes.updated_at = new Date().toISOString();
+    const SUPABASE_UPDATE_URL = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?id=eq.${encodeURIComponent(userId)}`;
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    fetch(SUPABASE_UPDATE_URL, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(changes)
+    })
+      .then(async (res) => {
+        const body = await res.text();
+        let result = [];
+        try { result = body ? JSON.parse(body) : []; } catch (e) {}
+        sendResponse(res.ok
+          ? { success: true, user: Array.isArray(result) ? result[0] : result }
+          : { success: false, message: body || `Supabase update failed (${res.status})` });
+      })
+      .catch((error) => sendResponse({ success: false, message: error.message }));
+    return true;
   }
   else if (message.type === 'SEND_ADMIN_OTP') {
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJcoGYhZOCybJRgvZTRial7Kb1XA4R4rIYKx2bkYJ-xgyPhYvsKM8f1T8V85OJJQIM/exec?action=send_admin_otp';
