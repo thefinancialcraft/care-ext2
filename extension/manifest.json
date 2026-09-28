@@ -30,7 +30,8 @@
     ],
     "host_permissions": [
       "https://wa.me/*",
-      "https://faveo.careinsurance.com/*"
+      "https://faveo.careinsurance.com/*",
+      "https://qfbeskgvxjwqccaraulv.supabase.co/*"
     ]
   }
   

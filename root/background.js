@@ -819,10 +819,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       method: 'GET',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
     })
-      .then(res => res.json())
-      .then(rows => {
+      .then(async res => {
+        const responseText = await res.text();
+        let rows;
+        try { rows = responseText ? JSON.parse(responseText) : []; } catch (err) {
+          throw new Error(`Invalid Supabase lookup response (${res.status})`);
+        }
+        if (!res.ok) {
+          throw new Error(typeof rows === 'object' && rows.message ? rows.message : `Supabase lookup failed (${res.status})`);
+        }
+        if (!Array.isArray(rows)) throw new Error('Unexpected Supabase lookup response');
+
         if (Array.isArray(rows) && rows.length > 0) {
-          sendResponse({ success: true, message: 'User already exists' });
+          sendResponse({ success: false, message: 'An account with this extension ID already exists' });
         } else {
           const generate9CharId = () => {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -856,12 +865,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               created_at: new Date().toISOString()
             })
           })
-            .then(res => res.json())
-            .then(data => sendResponse({ success: true, data }))
+            .then(async res => {
+              const responseText = await res.text();
+              let data;
+              try { data = responseText ? JSON.parse(responseText) : null; } catch (err) {
+                throw new Error(`Invalid Supabase registration response (${res.status})`);
+              }
+              if (!res.ok) {
+                sendResponse({ success: false, message: data && data.message ? data.message : `Supabase registration failed (${res.status})` });
+                return;
+              }
+              sendResponse({ success: true, data });
+            })
             .catch(err => sendResponse({ success: false, error: err.message }));
         }
       })
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .catch(err => sendResponse({ success: false, message: err.message }));
     return true;
   }
   else if (message.type === 'CHECK_AUTH') {

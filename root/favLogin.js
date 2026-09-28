@@ -1103,7 +1103,7 @@
                                 showLoginView(extId);
                             };
                         } else {
-                            alert('Failed: ' + (response ? response.message : 'Unknown error'));
+                            alert('Failed: ' + (response ? (response.message || response.error) : 'Unknown error'));
                             btn.innerHTML = 'SUBMIT'; btn.disabled = false;
                         }
                     });
