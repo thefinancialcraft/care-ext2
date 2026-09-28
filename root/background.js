@@ -741,7 +741,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.type === 'UPDATE_EXT_USER') {
     const payload = message.payload || {};
     const userId = String(payload.id || '').trim();
-    const allowedFields = ['status', 'is_admin', 'profile_visible', 'renewal_visible', 'otp_required', 'digital_discount', 'emi_option', 'agent_access'];
+    const allowedFields = ['extension_id', 'status', 'is_admin', 'profile_visible', 'renewal_visible', 'otp_required', 'digital_discount', 'emi_option', 'agent_access'];
     const changes = {};
 
     if (!userId) {
@@ -751,7 +751,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     allowedFields.forEach((field) => {
       if (Object.prototype.hasOwnProperty.call(payload.changes || {}, field)) {
-        changes[field] = field === 'status' || field === 'agent_access'
+        changes[field] = field === 'extension_id' || field === 'status' || field === 'agent_access'
           ? String(payload.changes[field] || '')
           : Boolean(payload.changes[field]);
       }
@@ -783,6 +783,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(res.ok
           ? { success: true, user: Array.isArray(result) ? result[0] : result }
           : { success: false, message: body || `Supabase update failed (${res.status})` });
+      })
+      .catch((error) => sendResponse({ success: false, message: error.message }));
+    return true;
+  }
+  else if (message.type === 'DELETE_EXT_USER') {
+    const userId = String(message.payload ? message.payload.id : '').trim();
+    if (!userId) {
+      sendResponse({ success: false, message: 'Missing user id' });
+      return true;
+    }
+
+    const SUPABASE_DELETE_URL = `https://qfbeskgvxjwqccaraulv.supabase.co/rest/v1/ext_user_data?id=eq.${encodeURIComponent(userId)}`;
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmYmVza2d2eGp3cWNjYXJhdWx2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MjQwMTQsImV4cCI6MjA5NzIwMDAxNH0.IPCGYN-v7UkRDygrvcGyZC-3uxjFoiSy7lTUoVe_l9M';
+
+    fetch(SUPABASE_DELETE_URL, {
+      method: 'DELETE',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=representation'
+      }
+    })
+      .then(async (res) => {
+        const body = await res.text();
+        let result = [];
+        try { result = body ? JSON.parse(body) : []; } catch (e) {}
+        if (!res.ok) {
+          sendResponse({ success: false, message: body || `Supabase delete failed (${res.status})` });
+        } else if (!Array.isArray(result) || result.length === 0) {
+          sendResponse({ success: false, message: 'User not found or delete was not permitted' });
+        } else {
+          sendResponse({ success: true });
+        }
       })
       .catch((error) => sendResponse({ success: false, message: error.message }));
     return true;

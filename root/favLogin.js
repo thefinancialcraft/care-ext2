@@ -1771,9 +1771,17 @@
                     name.innerText = user.user_name || 'Unnamed user';
                     name.style.cssText = 'font-size:12px; font-weight:700; color:#fff;';
                     var details = document.createElement('div');
-                    details.innerText = (user.user_email || '-') + ' | ID: ' + (user.extension_id || '-');
+                    details.innerText = user.user_email || '-';
                     details.style.cssText = 'font-size:9px; color:rgba(255,255,255,0.5); margin-top:2px;';
-                    identity.append(name, details);
+                    var systemIdLabel = document.createElement('label');
+                    systemIdLabel.innerText = 'System ID';
+                    systemIdLabel.style.cssText = 'display:block; font-size:9px; color:rgba(255,255,255,0.55); margin-top:6px;';
+                    var systemIdInput = document.createElement('input');
+                    systemIdInput.type = 'text';
+                    systemIdInput.value = user.extension_id || '';
+                    systemIdInput.dataset.field = 'extension_id';
+                    systemIdInput.style.cssText = 'width:150px; max-width:100%; box-sizing:border-box; margin-top:3px; padding:5px 7px; border:1px solid rgba(255,255,255,0.18); border-radius:5px; background:rgba(255,255,255,0.08); color:#fff; font-size:10px;';
+                    identity.append(name, details, systemIdLabel, systemIdInput);
 
                     var status = document.createElement('select');
                     status.dataset.field = 'status';
@@ -1853,10 +1861,19 @@
 
                     var saveBtn = document.createElement('button');
                     saveBtn.innerHTML = '<i class="fi flex fi-rr-check"></i> SAVE USER';
-                    saveBtn.style.cssText = 'width:100%; margin-top:7px; padding:7px; border:0; border-radius:5px; background:#00838f; color:#fff; cursor:pointer; font-size:10px; font-weight:700;';
+                    saveBtn.style.cssText = 'flex:1; min-width:0; padding:7px; border:0; border-radius:5px; background:#00838f; color:#fff; cursor:pointer; font-size:10px; font-weight:700;';
+                    var deleteBtn = document.createElement('button');
+                    deleteBtn.innerHTML = '<i class="fi flex fi-rr-trash"></i> DELETE USER';
+                    deleteBtn.style.cssText = 'flex:1; min-width:0; padding:7px; border:0; border-radius:5px; background:#b71c1c; color:#fff; cursor:pointer; font-size:10px; font-weight:700;';
+                    var userActions = document.createElement('div');
+                    userActions.style.cssText = 'display:flex; gap:7px; margin-top:7px;';
                     saveBtn.onclick = function() {
-                        var changes = { status: status.value };
-                        card.querySelectorAll('input[data-field]').forEach(function(input) { changes[input.dataset.field] = input.checked; });
+                        var changes = { status: status.value, extension_id: systemIdInput.value.trim() };
+                        if (!changes.extension_id) {
+                            alert('System ID cannot be empty.');
+                            return;
+                        }
+                        card.querySelectorAll('input[type="checkbox"][data-field]').forEach(function(input) { changes[input.dataset.field] = input.checked; });
                         changes.agent_access = accessCheckboxes.filter(function(input) { return input.checked; }).map(function(input) { return input.value; }).join(',');
                         saveBtn.disabled = true;
                         saveBtn.innerText = 'SAVING...';
@@ -1873,7 +1890,23 @@
                             }
                         });
                     };
-                    card.appendChild(saveBtn);
+                    deleteBtn.onclick = function() {
+                        if (!window.confirm('Delete this user account? This action cannot be undone.')) return;
+                        deleteBtn.disabled = true;
+                        deleteBtn.innerText = 'DELETING...';
+                        chrome.runtime.sendMessage({ type: 'DELETE_EXT_USER', payload: { id: user.id } }, function(response) {
+                            if (response && response.success) {
+                                users = users.filter(function(item) { return item.id !== user.id; });
+                                renderUsers();
+                            } else {
+                                deleteBtn.innerText = 'DELETE FAILED';
+                                deleteBtn.disabled = false;
+                                alert('Delete failed: ' + (response ? (response.message || response.error) : 'Unknown error'));
+                            }
+                        });
+                    };
+                    userActions.append(saveBtn, deleteBtn);
+                    card.appendChild(userActions);
                     usersContainer.appendChild(card);
                 });
             };
